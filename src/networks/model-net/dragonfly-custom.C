@@ -2329,16 +2329,16 @@ dragonfly_custom_terminal_final( terminal_state * s,
 {
 	model_net_print_stats(lp->gid, s->dragonfly_stats_array);
   
-    if(s->terminal_id == 0)
-    {
-        char meta_filename[64];
-        sprintf(meta_filename, "dragonfly-msg-stats.meta");
+    // if(s->terminal_id == 0)
+    // {
+    //     char meta_filename[64];
+    //     sprintf(meta_filename, "dragonfly-msg-stats.meta");
 
-        FILE * fp = fopen(meta_filename, "w+");
-        fprintf(fp, "# Format <LP id> <Terminal ID> <Total Data Size> <Avg packet latency> <# Flits/Packets finished> <Avg hops> <Busy Time> <Max packet Latency> <Min packet Latency >\n");
-    }
+    //     FILE * fp = fopen(meta_filename, "w+");
+    //     fprintf(fp, "# Format <LP id> <Terminal ID> <Total Data Size> <Avg packet latency> <# Flits/Packets finished> <Avg hops> <Busy Time> <Max packet Latency> <Min packet Latency >\n");
+    // }
     int written = 0;
-
+    written += sprintf(s->output_buf, "# Format <LP id> <Terminal ID> <Total Data Size> <Avg packet latency> <# Flits/Packets finished> <Avg hops> <Busy Time> <Max packet Latency> <Min packet Latency >\n");
     written += sprintf(s->output_buf + written, "%llu %u %llu %lf %ld %lf %lf %lf %lf\n",
             LLU(lp->gid), s->terminal_id, LLU(s->total_msg_size), s->total_time/s->finished_chunks, 
             s->finished_packets, (double)s->total_hops/s->finished_chunks,

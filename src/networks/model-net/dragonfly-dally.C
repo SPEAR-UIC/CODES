@@ -3144,20 +3144,24 @@ dragonfly_dally_terminal_final( terminal_state * s,
 
     lp_io_write(lp->gid, (char*)"dragonfly-link-stats", written, s->output_buf); 
     
-    if(s->terminal_id == 0)
-    {
-        //fclose(dragonfly_term_bw_log);
-        char meta_filename[128];
-        sprintf(meta_filename, "dragonfly-cn-stats.meta");
+    // if(s->terminal_id == 0)
+    // {
+    //     //fclose(dragonfly_term_bw_log);
+    //     char meta_filename[128];
+    //     sprintf(meta_filename, "dragonfly-cn-stats.meta");
 
-        FILE * fp = NULL;
-        fp = fopen(meta_filename, "w+");
-        if(fp)
-          fprintf(fp, "# Format <LP id> <Terminal ID> <Total Data Size> <Avg packet latency> <# Flits/Packets finished> <Busy Time> <Max packet Latency> <Min packet Latency >\n");
-        fclose(fp);
-    }
+    //     FILE * fp = NULL;
+    //     fp = fopen(meta_filename, "w+");
+    //     if(fp)
+    //       fprintf(fp, "# Format <LP id> <Terminal ID> <Total Data Size> <Avg packet latency> <# Flits/Packets finished> <Busy Time> <Max packet Latency> <Min packet Latency >\n");
+    //     fclose(fp);
+    // }
    
     written = 0;
+    if(s->terminal_id == 0)
+    {
+      written += sprintf(s->output_buf2 + written, "# Format <LP id> <Terminal ID> <Total Data Size> <Avg packet latency> <# Flits/Packets finished> <Busy Time> <Max packet Latency> <Min packet Latency >\n");
+    }
     written += sprintf(s->output_buf2 + written, "%llu %llu %lf %lf %lf %lf %llu %lf\n", 
             lp->gid, s->terminal_id, s->total_time/s->finished_chunks, 
             s->busy_time, s->max_latency, s->min_latency,

@@ -928,13 +928,13 @@ void arrive_syn_tr(nw_state * s, tw_bf * bf, nw_message * m, tw_lp * lp)
     num_syn_bytes_recvd += data;
 }
 /* Debugging functions, may generate unused function warning */
-/*static void print_waiting_reqs(uint32_t * reqs, int count)
+static void print_waiting_reqs(uint32_t * reqs, int count)
 {
     lprintf("\n Waiting reqs: %d count", count);
     int i;
     for(i = 0; i < count; i++ )
         lprintf(" %d ", reqs[i]);
-}*/
+}
 static void print_msgs_queue(struct qlist_head * head, int is_send)
 {
     if(is_send)
@@ -952,7 +952,7 @@ static void print_msgs_queue(struct qlist_head * head, int is_send)
 }
 static void print_completed_queue(tw_lp * lp, struct qlist_head * head)
 {
-//    printf("\n Completed queue: ");
+   printf("\n Completed queue: ");
       struct qlist_head * ent = NULL;
       struct completed_requests* current = NULL;
       tw_output(lp, "\n");
@@ -1238,6 +1238,7 @@ static void codes_exec_mpi_wait_all(
       print_waiting_reqs(mpi_op->u.waits.req_ids, count);
       print_completed_queue(lp, &s->completed_reqs);
   }*/
+
       /* check number of completed irecvs in the completion queue */
   for(i = 0; i < count; i++)
   {
@@ -2182,6 +2183,7 @@ void nw_test_init(nw_state* s, tw_lp* lp)
        }
        /*TODO: nprocs is different for dumpi and online workload. for
         * online, it is the number of ranks to be simulated. */
+       // printf("num_traces_of_job %d\n", num_traces_of_job[lid.job]);
        oc_params.nprocs = num_traces_of_job[lid.job]; 
        params = (char*)&oc_params;
        strcpy(type_name, "conc_online_comm_workload");
@@ -2526,7 +2528,7 @@ static void get_next_mpi_operation(nw_state* s, tw_bf * bf, nw_message * m, tw_l
             
             /* Notify ranks from other job that checkpoint traffic has
              * completed */
-             printf("\n Network node %d Rank %d finished at %lf ", s->local_rank, s->nw_id, tw_now(lp));
+             // printf("\n Network node %d Rank %d finished at %lf ", s->local_rank, s->nw_id, tw_now(lp));
             int num_jobs = codes_jobmap_get_num_jobs(jobmap_ctx); 
              if(num_jobs <= 1 || is_synthetic == 0)
              {
@@ -2537,7 +2539,6 @@ static void get_next_mpi_operation(nw_state* s, tw_bf * bf, nw_message * m, tw_l
             if(num_qos_levels == 1) //notify neighbor isn't really compatible with QoS, so notify_neighbor is only called if num_qos_levels == 1 (QoS off)
                 notify_neighbor(s, lp, bf, m);
 //             printf("Client rank %llu completed workload, local rank %d .\n", s->nw_id, s->local_rank);
-
              return;
         }
 		switch(mpi_op->op_type)

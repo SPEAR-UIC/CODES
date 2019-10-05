@@ -126,8 +126,6 @@ if test "x${with_online}" != "x" ; then
     AM_CONDITIONAL(USE_ONLINE, true)
     PKG_CHECK_MODULES_STATIC([ARGOBOTS], [argobots], [],
                       [AC_MSG_ERROR([Could not find working argobots installation via pkg-config])])
-    AC_DEFINE_UNQUOTED([ONLINE_CONFIGDIR], ["$with_online"], [if using json data files, 
-                    specify config directory])
 else
     AM_CONDITIONAL(USE_ONLINE, false)
 fi
@@ -151,13 +149,20 @@ fi
 AC_ARG_WITH([conceptual],[AS_HELP_STRING([--with-conceptual@<:@=DIR@:>@],
                         [location of Conceptual installation])])
 if test "x${with_conceptual}" != "x" ; then
-  AC_CHECK_FILES([${with_conceptual}/lib/libncptl.a],
-    AM_CONDITIONAL(USE_CONC, true),
-    AC_MSG_ERROR(Could not find Conceptual libraries libncptl.a))
-  CONCEPTUAL_CFLAGS="-I${with_conceptual}/include"
-  CONCEPTUAL_LIBS="-L${with_conceptual}/lib/ -lncptl"
-  AC_SUBST(CONCEPTUAL_LIBS)
-  AC_SUBST(CONCEPTUAL_CFLAGS)
+    AC_CHECK_FILES([${with_conceptual}/lib/libncptl.a],
+        AM_CONDITIONAL(USE_CONC, true),
+        AC_MSG_ERROR(Could not find Conceptual libraries libncptl.a))
+    CONCEPTUAL_CFLAGS="-I${with_conceptual}/include"
+    CONCEPTUAL_LIBS="-L${with_conceptual}/lib/ -lncptl"
+    AC_SUBST(CONCEPTUAL_LIBS)
+    AC_SUBST(CONCEPTUAL_CFLAGS)
+    PKG_CHECK_MODULES_STATIC([COWG], [cowg], [],
+                      [AC_MSG_ERROR([Could not find working cowg installation via pkg-config])])
+    PKG_CHECK_VAR([COWG_DATADIR], [cowg], [datadir], [],
+              [AC_MSG_ERROR[Could not find shared directory in COWG]])
+    AC_DEFINE_UNQUOTED([COWG_DATADIR], ["$COWG_DATADIR"], [if using json
+                    data files])
+
 else
   AM_CONDITIONAL(USE_CONC, false)
 fi
