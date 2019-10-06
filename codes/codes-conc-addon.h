@@ -37,6 +37,7 @@ int codes_conc_bench_load(
 void CODES_MPI_Comm_size (MPI_Comm comm, int *size);
 void CODES_MPI_Comm_rank( MPI_Comm comm, int *rank );
 void CODES_MPI_Finalize();
+void CODES_Compute(long cycle_count);
 void CODES_MPI_Send(const void *buf, 
             int count, 
             MPI_Datatype datatype, 
@@ -77,6 +78,8 @@ void CODES_MPI_Irecv(void *buf,
             int tag,
             MPI_Comm comm, 
             MPI_Request *request);
+void CODES_MPI_Wait(MPI_Request *request,
+            MPI_Status *status);
 void CODES_MPI_Waitall(int count, 
             MPI_Request array_of_requests[], 
             MPI_Status array_of_statuses[]);

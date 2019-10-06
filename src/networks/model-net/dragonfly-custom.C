@@ -177,6 +177,14 @@ struct dragonfly_param
     double global_delay;
     double credit_delay;
     double router_delay;
+
+    //Xin: parameters for message counters of apps
+    int counting_bool;
+    tw_stime counting_start; 
+    tw_stime counting_interval; 
+    int counting_windows;
+    int num_apps;
+
 };
 
 struct dfly_hash_key
@@ -368,11 +376,17 @@ struct router_state
    
    char output_buf[4096];
    char output_buf2[4096];
+   char output_buf3[4096];
+   char output_buf4[4096];
 
    struct dfly_router_sample * rsamples;
    
    long fwd_events;
    long rev_events;
+
+   //Xin: msg couters for apps
+   int **recv_msg_counters;
+   int **send_msg_counters;
 
    /* following used for ROSS model-level stats collection */
    tw_stime* busy_time_ross_sample;
@@ -437,7 +451,7 @@ static int dragonfly_rank_hash_compare(
 static int dragonfly_hash_func(void *k, int table_size)
 {
     struct dfly_hash_key *tmp = (struct dfly_hash_key *)k;
-    uint32_t pc = 0, pb = 0;	
+    uint32_t pc = 0, pb = 0;  
     bj_hashlittle2(tmp, sizeof(*tmp), &pc, &pb);
     return (int)(pc % (table_size - 1));
     /*uint64_t key = (~tmp->message_id) + (tmp->message_id << 18);
@@ -465,7 +479,7 @@ static tw_stime bytes_to_ns(uint64_t bytes, double GB_p_s)
 /* returns the dragonfly message size */
 int dragonfly_custom_get_msg_sz(void)
 {
-	   return sizeof(terminal_custom_message);
+     return sizeof(terminal_custom_message);
 }
 
 static void free_tmp(void * ptr)
@@ -562,9 +576,9 @@ static void dragonfly_read_config(const char * anno, dragonfly_param *params){
 
     rc = configuration_get_value_int(&config, "PARAMS", "adaptive_threshold", anno, &adaptive_threshold);
     if(rc) {
-    	adaptive_threshold = p->local_vc_size / 8;
+      adaptive_threshold = p->local_vc_size / 8;
         printf("\n Setting adaptive threshold to %d ", adaptive_threshold);
-	}
+  }
     else
     {
         printf("\n Setting adaptive threshold to %d ", adaptive_threshold);
@@ -586,7 +600,7 @@ static void dragonfly_read_config(const char * anno, dragonfly_param *params){
         BIAS_MIN = 0;
     }
     else
-	printf("\n Setting minimal bias");
+  printf("\n Setting minimal bias");
 
     rc = configuration_get_value_int(&config, "PARAMS", "cn_vc_size", anno, &p->cn_vc_size);
     if(rc) {
@@ -640,12 +654,29 @@ static void dragonfly_read_config(const char * anno, dragonfly_param *params){
     else if (strcmp(routing_str, "adaptive") == 0)
         routing = ADAPTIVE;
     else if (strcmp(routing_str, "prog-adaptive") == 0)
-	      routing = PROG_ADAPTIVE;
+        routing = PROG_ADAPTIVE;
     else
     {
         fprintf(stderr, 
                 "No routing protocol specified, setting to minimal routing\n");
         routing = -1;
+    }
+
+    //Xin: app msgs counting on routers
+    rc = configuration_get_value_int(&config, "PARAMS", "counting_bool", anno, &p->counting_bool);
+    if(p->counting_bool) {
+        int rc1 = configuration_get_value_double(&config, "PARAMS", "counting_start", anno, &p->counting_start);
+        int rc2 = configuration_get_value_int(&config, "PARAMS", "counting_windows", anno, &p->counting_windows);
+        int rc3 = configuration_get_value_double(&config, "PARAMS", "counting_interval", anno, &p->counting_interval);
+        int rc4 = configuration_get_value_int(&config, "PARAMS", "num_apps", anno, &p->num_apps);
+        if(rc1 || rc2 || rc3 || rc4)
+            tw_error(TW_LOC, "\n Missing couting values, (counting_start/windows/interval/num_apps) check for config files\n");
+
+        //convert us to ns
+        p->counting_start = p->counting_start * 1000;
+        p->counting_interval = p->counting_interval * 1000;
+
+        //printf("start %f, end %f, interval %f\n", p->counting_start, p->counting_end, p->counting_interval);
     }
 
     // rc = configuration_get_value_int(&config, "PARAMS", "num_vcs_override", anno, &p->num_vcs);
@@ -872,7 +903,7 @@ void dragonfly_custom_configure(){
         dragonfly_read_config(NULL, &all_params[anno_map->num_annos]);
     }
 #ifdef ENABLE_CORTEX
-	model_net_topology = dragonfly_custom_cortex_topology;
+  model_net_topology = dragonfly_custom_cortex_topology;
 #endif
 }
 
@@ -901,13 +932,13 @@ void dragonfly_custom_report_stats()
    MPI_Reduce( &num_remote_packets, &total_remote_packets, 1, MPI_LONG, MPI_SUM, 0, MPI_COMM_CODES);
    if(routing == ADAPTIVE || routing == PROG_ADAPTIVE || SHOW_ADAP_STATS)
     {
-	MPI_Reduce(&minimal_count, &total_minimal_packets, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_CODES);
- 	MPI_Reduce(&nonmin_count, &total_nonmin_packets, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_CODES);
+  MPI_Reduce(&minimal_count, &total_minimal_packets, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_CODES);
+  MPI_Reduce(&nonmin_count, &total_nonmin_packets, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_CODES);
     }
 
    /* print statistics */
    if(!g_tw_mynode)
-   {	
+   {  
       printf(" Average number of hops traversed %f average chunk latency %lf us maximum chunk latency %lf us avg message size %lf bytes finished messages %lld finished chunks %lld \n", 
               (float)avg_hops/total_finished_chunks, avg_time/(total_finished_chunks*1000), max_time/1000, (float)final_msg_sz/total_finished_msgs, total_finished_msgs, total_finished_chunks);
      if(routing == ADAPTIVE || routing == PROG_ADAPTIVE || SHOW_ADAP_STATS)
@@ -923,7 +954,7 @@ void dragonfly_custom_report_stats()
 /* initialize a dragonfly compute node terminal */
 void 
 terminal_custom_init( terminal_state * s, 
-	       tw_lp * lp )
+         tw_lp * lp )
 {
     s->packet_gen = 0;
     s->packet_fin = 0;
@@ -1066,6 +1097,19 @@ void router_custom_setup(router_state * r, tw_lp * lp)
    r->ross_rsample.busy_time = (tw_stime*)calloc(p->radix, sizeof(tw_stime));
    r->ross_rsample.link_traffic_sample = (int64_t*)calloc(p->radix, sizeof(int64_t));
 
+    //Xin: msg counters for apps 
+    if(p->counting_bool > 0)
+    {   
+        r->recv_msg_counters = (int **) calloc(p->counting_windows, sizeof(int *));
+        r->send_msg_counters = (int **) calloc(p->counting_windows, sizeof(int *));
+
+        for (int i = 0; i < p->counting_windows; ++i)
+        {
+            r->recv_msg_counters[i] = (int*) calloc(p->num_apps, sizeof(int));
+            r->send_msg_counters[i] = (int*) calloc(p->num_apps, sizeof(int));
+        }
+    }
+
    rc_stack_create(&r->st);
 
    for(int i = 0; i < p->num_router_rows; i++)
@@ -1076,12 +1120,12 @@ void router_custom_setup(router_state * r, tw_lp * lp)
        // Set credit & router occupancy
     r->busy_time[i] = 0.0;
     r->busy_time_sample[i] = 0.0;
-	r->next_output_available_time[i]=0;
-	r->cur_hist_start_time[i] = 0;
+  r->next_output_available_time[i]=0;
+  r->cur_hist_start_time[i] = 0;
     r->link_traffic[i]=0;
     r->link_traffic_sample[i] = 0;
-	r->cur_hist_num[i] = 0;
-	r->prev_hist_num[i] = 0;
+  r->cur_hist_num[i] = 0;
+  r->prev_hist_num[i] = 0;
     r->queued_count[i] = 0;    
     r->in_send_loop[i] = 0;
     r->vc_occupancy[i] = (int*)malloc(p->num_vcs * sizeof(int));
@@ -1104,7 +1148,7 @@ void router_custom_setup(router_state * r, tw_lp * lp)
         }
     }
    return;
-}	
+} 
 
 
 /* dragonfly packet event , generates a dragonfly packet on the compute node */
@@ -1148,6 +1192,9 @@ static tw_stime dragonfly_custom_packet_event(
     msg->magic = terminal_magic_num; 
     msg->msg_start_time = req->msg_start_time;
 
+    //Xin: for msg counters of apps, find app ids from lp id
+    msg->app_id = req->app_id;
+
     if(is_last_pckt) /* Its the last packet so pass in remote and local event information*/
       {
         if(req->remote_event_size > 0)
@@ -1163,7 +1210,7 @@ static tw_stime dragonfly_custom_packet_event(
             tmp_ptr += req->self_event_size;
         }
      }
-	   //printf("\n dragonfly remote event %d local event %d last packet %d %lf ", msg->remote_event_size_bytes, msg->local_event_size_bytes, is_last_pckt, xfer_to_nic_time);
+     //printf("\n dragonfly remote event %d local event %d last packet %d %lf ", msg->remote_event_size_bytes, msg->local_event_size_bytes, is_last_pckt, xfer_to_nic_time);
     tw_event_send(e_new);
     return xfer_to_nic_time;
 }
@@ -1171,8 +1218,8 @@ static tw_stime dragonfly_custom_packet_event(
 /* dragonfly packet event reverse handler */
 static void dragonfly_custom_packet_event_rc(tw_lp *sender)
 {
-	  codes_local_latency_reverse(sender);
-	    return;
+    codes_local_latency_reverse(sender);
+      return;
 }
 
 /*When a packet is sent from the current router and a buffer slot becomes available, a credit is sent back to schedule another packet event*/
@@ -1201,7 +1248,7 @@ static void router_credit_send(router_state * s, terminal_custom_message * msg,
     printf("\n Invalid message type");
 
   ts = g_tw_lookahead + p->credit_delay +  tw_rand_unif(lp->rng);
-	
+  
   if (is_terminal) {
     buf_e = model_net_method_event_new(dest, ts, lp, DRAGONFLY_CUSTOM, 
       (void**)&buf_msg, NULL);
@@ -1371,7 +1418,7 @@ static void packet_generate(terminal_state * s, tw_bf * bf, terminal_custom_mess
   stat->send_bytes += msg->packet_size;
   stat->send_time += (1/p->cn_bandwidth) * msg->packet_size;
   if(stat->max_event_size < total_event_size)
-	  stat->max_event_size = total_event_size;
+    stat->max_event_size = total_event_size;
 
   return;
 }
@@ -1610,9 +1657,9 @@ static void packet_arrive_rc(terminal_state * s, tw_bf * bf, terminal_custom_mes
        }
       
        if(bf->c22)
-	{
+  {
           s->max_latency = msg->saved_available_time;
-	} 
+  } 
        if(bf->c7)
         {
             //assert(!hash_link);
@@ -1626,7 +1673,7 @@ static void packet_arrive_rc(terminal_state * s, tw_bf * bf, terminal_custom_mes
             s->ross_sample.data_size_sample -= msg->total_size;
             s->data_size_ross_sample -= msg->total_size;
 
-	        struct dfly_qhash_entry * d_entry_pop = (dfly_qhash_entry *)rc_stack_pop(s->st);
+          struct dfly_qhash_entry * d_entry_pop = (dfly_qhash_entry *)rc_stack_pop(s->st);
             qhash_add(s->rank_tbl, &key, &(d_entry_pop->hash_link));
             s->rank_tbl_pop++; 
             
@@ -1644,11 +1691,11 @@ static void packet_arrive_rc(terminal_state * s, tw_bf * bf, terminal_custom_mes
        tmp->num_chunks--;
 
        if(bf->c5)
-	   {
-	        qhash_del(hash_link);
-	        free_tmp(tmp);	
+     {
+          qhash_del(hash_link);
+          free_tmp(tmp);  
             s->rank_tbl_pop--;
-	    }
+      }
        return;
 }
 static void send_remote_event(terminal_state * s, terminal_custom_message * msg, tw_lp * lp, tw_bf * bf, char * event_data, int remote_event_size)
@@ -1854,19 +1901,19 @@ static void packet_arrive(terminal_state * s, tw_bf * bf, terminal_custom_messag
          memcpy(tmp->remote_event_data, m_data_src, msg->remote_event_size_bytes);
     }
      if(s->min_latency > tw_now(lp) - msg->travel_start_time) {
-		s->min_latency = tw_now(lp) - msg->travel_start_time;	
-	}
+    s->min_latency = tw_now(lp) - msg->travel_start_time; 
+  }
         if (dragonfly_max_latency < tw_now( lp ) - msg->travel_start_time) {
           bf->c3 = 1;
           msg->saved_available_time = dragonfly_max_latency;
           dragonfly_max_latency = tw_now( lp ) - msg->travel_start_time;
           s->max_latency = tw_now(lp) - msg->travel_start_time;
         }
-	if(s->max_latency < tw_now( lp ) - msg->travel_start_time) {
-	  bf->c22 = 1;
-	  msg->saved_available_time = s->max_latency;
-	  s->max_latency = tw_now(lp) - msg->travel_start_time;
-	}
+  if(s->max_latency < tw_now( lp ) - msg->travel_start_time) {
+    bf->c22 = 1;
+    msg->saved_available_time = s->max_latency;
+    s->max_latency = tw_now(lp) - msg->travel_start_time;
+  }
     /* If all chunks of a message have arrived then send a remote event to the
      * callee*/
     //assert(tmp->num_chunks <= total_chunks);
@@ -2248,9 +2295,9 @@ void dragonfly_custom_sample_fin(terminal_state * s,
 }
 
 static void terminal_buf_update_rc(terminal_state * s,
-		    tw_bf * bf, 
-		    terminal_custom_message * msg, 
-		    tw_lp * lp)
+        tw_bf * bf, 
+        terminal_custom_message * msg, 
+        tw_lp * lp)
 {
       s->vc_occupancy[0] += s->params->chunk_size;
       codes_local_latency_reverse(lp);
@@ -2263,9 +2310,9 @@ static void terminal_buf_update_rc(terminal_state * s,
 /* update the compute node-router channel buffer */
 static void 
 terminal_buf_update(terminal_state * s, 
-		    tw_bf * bf, 
-		    terminal_custom_message * msg, 
-		    tw_lp * lp)
+        tw_bf * bf, 
+        terminal_custom_message * msg, 
+        tw_lp * lp)
 {
   bf->c1 = 0;
   bf->c2 = 0;
@@ -2289,9 +2336,9 @@ terminal_buf_update(terminal_state * s,
 
 void 
 terminal_custom_event( terminal_state * s, 
-		tw_bf * bf, 
-		terminal_custom_message * msg, 
-		tw_lp * lp )
+    tw_bf * bf, 
+    terminal_custom_message * msg, 
+    tw_lp * lp )
 {
   s->fwd_events++;
   s->ross_sample.fwd_events++;
@@ -2327,18 +2374,21 @@ void
 dragonfly_custom_terminal_final( terminal_state * s, 
       tw_lp * lp )
 {
-	model_net_print_stats(lp->gid, s->dragonfly_stats_array);
+  model_net_print_stats(lp->gid, s->dragonfly_stats_array);
   
-    if(s->terminal_id == 0)
-    {
-        char meta_filename[64];
-        sprintf(meta_filename, "dragonfly-msg-stats.meta");
+    // if(s->terminal_id == 0)
+    // {
+    //     char meta_filename[64];
+    //     sprintf(meta_filename, "dragonfly-msg-stats.meta");
 
-        FILE * fp = fopen(meta_filename, "w+");
-        fprintf(fp, "# Format <LP id> <Terminal ID> <Total Data Size> <Avg packet latency> <# Flits/Packets finished> <Avg hops> <Busy Time> <Max packet Latency> <Min packet Latency >\n");
-    }
+    //     FILE * fp = fopen(meta_filename, "w+");
+    //     fprintf(fp, "# Format <LP id> <Terminal ID> <Total Data Size> <Avg packet latency> <# Flits/Packets finished> <Avg hops> <Busy Time> <Max packet Latency> <Min packet Latency >\n");
+    // }
     int written = 0;
-
+    if(!s->terminal_id)
+    {
+      written += sprintf(s->output_buf, "# Format <LP id> <Terminal ID> <Total Data Size> <Avg packet latency> <# Flits/Packets finished> <Avg hops> <Busy Time> <Max packet Latency> <Min packet Latency >\n");
+    }
     written += sprintf(s->output_buf + written, "%llu %u %llu %lf %ld %lf %lf %lf %lf\n",
             LLU(lp->gid), s->terminal_id, LLU(s->total_msg_size), s->total_time/s->finished_chunks, 
             s->finished_packets, (double)s->total_hops/s->finished_chunks,
@@ -2363,7 +2413,7 @@ dragonfly_custom_terminal_final( terminal_state * s,
 }
 
 void dragonfly_custom_router_final(router_state * s,
-		tw_lp * lp)
+    tw_lp * lp)
 {
    free(s->global_channel);
     int i, j;
@@ -2415,6 +2465,35 @@ void dragonfly_custom_router_final(router_state * s,
         written += sprintf(s->output_buf2 + written, " %lld", LLD(s->link_traffic[d]));
 
     lp_io_write(lp->gid, (char*)"dragonfly-router-traffic", written, s->output_buf2);
+
+    //Xin: output msg counters of apps
+    if(s->params->counting_bool)
+    {
+      // for received msgs
+      if(!s->router_id) {
+          written = sprintf(s->output_buf3, "# Format <LP ID> <Group ID> <Router ID> <Timestamp> <Msg Counters>\n");
+          lp_io_write(lp->gid, (char*)"dragonfly-router-recv-msgs", written, s->output_buf3);
+      }
+      for(int i=0; i < p->counting_windows; i++) {
+        written = sprintf(s->output_buf3, "\n %llu %d %d %lf", LLU(lp->gid), s->router_id / p->num_routers, s->router_id % p->num_routers, (p->counting_start+(i+1)*p->counting_interval));
+        for (int d=0; d < p->num_apps; d++)
+          written += sprintf(s->output_buf3 + written, " %d", (s->recv_msg_counters[i][d]));
+        lp_io_write(lp->gid, (char*)"dragonfly-router-recv-msgs", written, s->output_buf3);
+      }
+
+      // for send msgs
+      if(!s->router_id){
+          written = sprintf(s->output_buf4, "# Format <LP ID> <Group ID> <Router ID> <Window ID> <Msg Counters>\n");
+          lp_io_write(lp->gid, (char*)"dragonfly-router-send-msgs", written, s->output_buf4);
+      }
+      for(int i=0; i < p->counting_windows; i++) {
+          written = sprintf(s->output_buf4, "\n %llu %d %d %lf", LLU(lp->gid), s->router_id / p->num_routers, s->router_id % p->num_routers, (p->counting_start+(i+1)*p->counting_interval));
+          for (int d=0; d < p->num_apps; d++)
+              written += sprintf(s->output_buf4 + written, " %d", (s->recv_msg_counters[i][d]));
+          lp_io_write(lp->gid, (char*)"dragonfly-router-send-msgs", written, s->output_buf4);
+      }      
+    }
+
 }
 
 static vector<int> get_intra_router(router_state * s, int src_router_id, int dest_router_id, int num_rtrs_per_grp)
@@ -2476,8 +2555,8 @@ static tw_lpid
 get_next_stop(router_state * s, 
               tw_lp * lp,
               tw_bf * bf,
-		      terminal_custom_message * msg, 
-		      int dest_router_id,
+          terminal_custom_message * msg, 
+          int dest_router_id,
               int adap_chan,
               int do_chan_selection)
 {
@@ -2565,10 +2644,10 @@ get_next_stop(router_state * s,
 /* gets the output port corresponding to the next stop of the message */
 static int 
 get_output_port( router_state * s, 
-		terminal_custom_message * msg, 
+    terminal_custom_message * msg, 
         tw_lp * lp, 
         tw_bf * bf,
-		int next_stop)
+    int next_stop)
 {
   int output_port = -1;
   int rand_offset = -1;
@@ -2692,7 +2771,7 @@ static void do_local_adaptive_routing(router_state * s,
 
   if(BIAS_MIN == 1)
   {
-	nonmin_port_count = nonmin_port_count * 2;
+  nonmin_port_count = nonmin_port_count * 2;
   }
 
   msg->path_type = MINIMAL;
@@ -2705,9 +2784,9 @@ static void do_local_adaptive_routing(router_state * s,
 }
 static int do_global_adaptive_routing( router_state * s,
                  tw_lp * lp,
-				 terminal_custom_message * msg,
+         terminal_custom_message * msg,
                  tw_bf * bf,
-				 int dest_router_id,
+         int dest_router_id,
                  int intm_id) {
   int next_chan = -1;
   // decide which routing to take
@@ -2898,7 +2977,7 @@ static int do_global_adaptive_routing( router_state * s,
 
   if(BIAS_MIN == 1)
   {
-	next_nonmin_count = next_nonmin_count * 2;
+  next_nonmin_count = next_nonmin_count * 2;
   }
   /* Now compare the least congested minimal and non-minimal routes */
   if(next_min_count > adaptive_threshold && next_min_count > next_nonmin_count)
@@ -2936,10 +3015,17 @@ static void router_packet_receive_rc(router_state * s,
         tw_lp * lp)
 {
     router_rev_ecount++;
-	router_ecount--;
+  router_ecount--;
       
     int output_port = msg->saved_vc;
     int output_chan = msg->saved_channel;
+
+    //Xin: reverse msg couters 
+    if(s->params->counting_bool>0 && msg->last_received_time >= s->params->counting_start) {
+        int current_window = (int) ((msg->last_received_time-s->params->counting_start)/s->params->counting_interval);
+        if(current_window < s->params->counting_windows)
+          s->recv_msg_counters[current_window][msg->app_id]--;    
+    }
 
     tw_rand_reverse_unif(lp->rng);
 
@@ -2996,9 +3082,9 @@ static void router_packet_receive_rc(router_state * s,
 /* Packet arrives at the router and a credit is sent back to the sending terminal/router */
 static void 
 router_packet_receive( router_state * s, 
-			tw_bf * bf, 
-			terminal_custom_message * msg, 
-			tw_lp * lp )
+      tw_bf * bf, 
+      terminal_custom_message * msg, 
+      tw_lp * lp )
 {
   router_ecount++;
 
@@ -3014,9 +3100,17 @@ router_packet_receive( router_state * s,
 
   terminal_custom_message_list * cur_chunk = (terminal_custom_message_list*)calloc(sizeof(terminal_custom_message_list), 1);
   init_terminal_custom_message_list(cur_chunk, msg);
-  
+
+  //Xin: count packets received & identify their app id 
+  msg->last_received_time = tw_now(lp);
+  if(s->params->counting_bool>0 && msg->last_received_time >= s->params->counting_start) {
+      int current_window = (int) ((msg->last_received_time - s->params->counting_start)/s->params->counting_interval);
+      if(current_window < s->params->counting_windows)
+          s->recv_msg_counters[current_window][msg->app_id]++;
+  } 
+
   if(routing == MINIMAL || 
-     routing == NON_MINIMAL)	
+     routing == NON_MINIMAL)  
    cur_chunk->msg.path_type = routing; /*defaults to the routing algorithm if we 
                                 don't have adaptive or progressive adaptive routing here*/
        
@@ -3244,8 +3338,8 @@ router_packet_receive( router_state * s,
 }
 
 static void router_packet_send_rc(router_state * s, 
-		    tw_bf * bf, 
-		     terminal_custom_message * msg, tw_lp * lp)
+        tw_bf * bf, 
+         terminal_custom_message * msg, tw_lp * lp)
 {
     router_ecount--;
     router_rev_ecount++;
@@ -3255,6 +3349,13 @@ static void router_packet_send_rc(router_state * s,
     if(bf->c1) {
         s->in_send_loop[output_port] = 1;
         return;  
+    }
+
+    //Xin: reverse msg couters 
+    if(s->params->counting_bool>0 && msg->last_sent_time >= s->params->counting_start) {
+        int current_window = (int) ((msg->last_sent_time-s->params->counting_start)/s->params->counting_interval);
+        if(current_window < s->params->counting_windows)
+          s->send_msg_counters[current_window][msg->app_id]--;    
     }
       
     tw_rand_reverse_unif(lp->rng);
@@ -3292,8 +3393,8 @@ static void router_packet_send_rc(router_state * s,
 /* routes the current packet to the next stop */
 static void 
 router_packet_send( router_state * s, 
-		    tw_bf * bf, 
-		     terminal_custom_message * msg, tw_lp * lp)
+        tw_bf * bf, 
+         terminal_custom_message * msg, tw_lp * lp)
 {
   router_ecount++;
 
@@ -3323,6 +3424,14 @@ router_packet_send( router_state * s,
     s->in_send_loop[output_port] = 0;
     return;
   }
+
+  //Xin: count packets sent & identify their app id 
+  msg->last_sent_time = tw_now(lp);
+  if(s->params->counting_bool>0 && msg->last_sent_time >= s->params->counting_start) {
+      int current_window = (int) ((msg->last_sent_time - s->params->counting_start)/s->params->counting_interval);
+      if(current_window < s->params->counting_windows)
+          s->send_msg_counters[current_window][msg->app_id]++;
+  } 
 
   int to_terminal = 1, global = 0;
   double delay = s->params->cn_delay;
@@ -3555,7 +3664,7 @@ void router_custom_event(router_state * s, tw_bf * bf, terminal_custom_message *
         (int)msg->dest_terminal_id, (int)msg->packet_ID);
       tw_error(TW_LOC, "Msg type not supported");
       break;
-  }	   
+  }    
 }
 
 /* Reverse computation handler for a terminal event */
@@ -3744,7 +3853,7 @@ static void custom_router_register_model_types(st_model_types *base_type)
 /* returns the dragonfly lp type for lp registration */
 static const tw_lptype* dragonfly_custom_get_cn_lp_type(void)
 {
-	   return(&dragonfly_custom_lps[0]);
+     return(&dragonfly_custom_lps[0]);
 }
 static const tw_lptype* router_custom_get_lp_type(void)
 {
@@ -3828,9 +3937,9 @@ static int dragonfly_custom_get_number_of_routers(void* topo) {
 static double dragonfly_custom_get_router_link_bandwidth(void* topo, router_id_t r1, router_id_t r2) {
         // TODO: handle this function for multiple cables between the routers.
         // Right now it returns the bandwidth of a single cable only. 
-	// Given two router ids r1 and r2, this function should return the bandwidth (double)
-	// of the link between the two routers, or 0 of such a link does not exist in the topology.
-	// The function should return -1 if one of the router id is invalid.
+  // Given two router ids r1 and r2, this function should return the bandwidth (double)
+  // of the link between the two routers, or 0 of such a link does not exist in the topology.
+  // The function should return -1 if one of the router id is invalid.
     const dragonfly_param * params = &all_params[num_params-1];
     if(!params)
         return -1.0;
@@ -3881,9 +3990,9 @@ static double dragonfly_custom_get_router_link_bandwidth(void* topo, router_id_t
 
 static double dragonfly_custom_get_compute_node_bandwidth(void* topo, cn_id_t node) {
         // TODO
-	// Given the id of a compute node, this function should return the bandwidth of the
-	// link connecting this compute node to its router.
-	// The function should return -1 if the compute node id is invalid.
+  // Given the id of a compute node, this function should return the bandwidth of the
+  // link connecting this compute node to its router.
+  // The function should return -1 if the compute node id is invalid.
     const dragonfly_param * params = &all_params[num_params-1];
     if(!params)
         return -1.0;
@@ -3896,9 +4005,9 @@ static double dragonfly_custom_get_compute_node_bandwidth(void* topo, cn_id_t no
 
 static int dragonfly_custom_get_router_neighbor_count(void* topo, router_id_t r) {
         // TODO
-	// Given the id of a router, this function should return the number of routers
-	// (not compute nodes) connected to it. It should return -1 if the router id
-	// is not valid.
+  // Given the id of a router, this function should return the number of routers
+  // (not compute nodes) connected to it. It should return -1 if the router id
+  // is not valid.
     const dragonfly_param * params = &all_params[num_params-1];
     if(!params)
         return -1.0;
@@ -3920,9 +4029,9 @@ static int dragonfly_custom_get_router_neighbor_count(void* topo, router_id_t r)
 }
 
 static void dragonfly_custom_get_router_neighbor_list(void* topo, router_id_t r, router_id_t* neighbors) {
-	// Given a router id r, this function fills the "neighbors" array with the ids of routers
-	// directly connected to r. It is assumed that enough memory has been allocated to "neighbors"
-	// (using get_router_neighbor_count to know the required size).
+  // Given a router id r, this function fills the "neighbors" array with the ids of routers
+  // directly connected to r. It is assumed that enough memory has been allocated to "neighbors"
+  // (using get_router_neighbor_count to know the required size).
     const dragonfly_param * params = &all_params[num_params-1];
 
     int gid = r / params->num_routers;
@@ -3983,14 +4092,14 @@ static void dragonfly_custom_get_router_neighbor_list(void* topo, router_id_t r,
 
 static int dragonfly_custom_get_router_location(void* topo, router_id_t r, int32_t* location, int size) {
         // TODO
-	// Given a router id r, this function should fill the "location" array (of maximum size "size")
-	// with information providing the location of the router in the topology. In a Dragonfly network,
-	// for instance, this can be the array [ group_id, router_id ] where group_id is the id of the
-	// group in which the router is, and router_id is the id of the router inside this group (as opposed
-	// to "r" which is its global id). For a torus network, this would be the dimensions.
-	// If the "size" is sufficient to hold the information, the function should return the size 
-	// effectively used (e.g. 2 in the above example). If however the function did not manage to use
-	// the provided buffer, it should return -1.
+  // Given a router id r, this function should fill the "location" array (of maximum size "size")
+  // with information providing the location of the router in the topology. In a Dragonfly network,
+  // for instance, this can be the array [ group_id, router_id ] where group_id is the id of the
+  // group in which the router is, and router_id is the id of the router inside this group (as opposed
+  // to "r" which is its global id). For a torus network, this would be the dimensions.
+  // If the "size" is sufficient to hold the information, the function should return the size 
+  // effectively used (e.g. 2 in the above example). If however the function did not manage to use
+  // the provided buffer, it should return -1.
     const dragonfly_param * params = &all_params[num_params-1];
     if(!params)
         return -1;
@@ -4010,9 +4119,9 @@ static int dragonfly_custom_get_router_location(void* topo, router_id_t r, int32
 
 static int dragonfly_custom_get_compute_node_location(void* topo, cn_id_t node, int32_t* location, int size) {
         // TODO
-	// This function does the same as dragonfly_custom_get_router_location but for a compute node instead
-	// of a router. E.g., for a dragonfly network, the location could be expressed as the array
-	// [ group_id, router_id, terminal_id ]
+  // This function does the same as dragonfly_custom_get_router_location but for a compute node instead
+  // of a router. E.g., for a dragonfly network, the location could be expressed as the array
+  // [ group_id, router_id, terminal_id ]
     const dragonfly_param * params = &all_params[num_params-1];
     if(!params)
         return -1;
@@ -4037,8 +4146,8 @@ static int dragonfly_custom_get_compute_node_location(void* topo, cn_id_t node, 
 
 static router_id_t dragonfly_custom_get_router_from_compute_node(void* topo, cn_id_t node) {
         // TODO
-	// Given a node id, this function returns the id of the router connected to the node,
-	// or -1 if the node id is not valid.
+  // Given a node id, this function returns the id of the router connected to the node,
+  // or -1 if the node id is not valid.
         const dragonfly_param * params = &all_params[num_params-1];
         if(!params)
             return -1;
@@ -4051,8 +4160,8 @@ static router_id_t dragonfly_custom_get_router_from_compute_node(void* topo, cn_
 }
 
 static int dragonfly_custom_get_router_compute_node_count(void* topo, router_id_t r) {
-	// Given the id of a router, returns the number of compute nodes connected to this
-	// router, or -1 if the router id is not valid.
+  // Given the id of a router, returns the number of compute nodes connected to this
+  // router, or -1 if the router id is not valid.
         const dragonfly_param * params = &all_params[num_params-1];
         if(!params)
             return -1;
@@ -4065,9 +4174,9 @@ static int dragonfly_custom_get_router_compute_node_count(void* topo, router_id_
 
 static void dragonfly_custom_get_router_compute_node_list(void* topo, router_id_t r, cn_id_t* nodes) {
         // TODO: What if there is an invalid router ID?
-	// Given the id of a router, fills the "nodes" array with the list of ids of compute nodes
-	// connected to this router. It is assumed that enough memory has been allocated for the
-	// "nodes" variable to hold all the ids.
+  // Given the id of a router, fills the "nodes" array with the list of ids of compute nodes
+  // connected to this router. It is assumed that enough memory has been allocated for the
+  // "nodes" variable to hold all the ids.
       const dragonfly_param * params = &all_params[num_params-1];
    
       for(int i = 0; i < params->num_cn; i++)
@@ -4078,27 +4187,27 @@ extern "C" {
 
 cortex_topology dragonfly_custom_cortex_topology = {
 //        .internal = 
-			NULL,
-//		  .get_number_of_routers          = 
-			dragonfly_custom_get_number_of_routers,
-//		  .get_number_of_compute_nodes	  = 
-			dragonfly_custom_get_number_of_compute_nodes,
+      NULL,
+//      .get_number_of_routers          = 
+      dragonfly_custom_get_number_of_routers,
+//      .get_number_of_compute_nodes    = 
+      dragonfly_custom_get_number_of_compute_nodes,
 //        .get_router_link_bandwidth      = 
-			dragonfly_custom_get_router_link_bandwidth,
+      dragonfly_custom_get_router_link_bandwidth,
 //        .get_compute_node_bandwidth     = 
-			dragonfly_custom_get_compute_node_bandwidth,
+      dragonfly_custom_get_compute_node_bandwidth,
 //        .get_router_neighbor_count      = 
-			dragonfly_custom_get_router_neighbor_count,
+      dragonfly_custom_get_router_neighbor_count,
 //        .get_router_neighbor_list       = 
-			dragonfly_custom_get_router_neighbor_list,
+      dragonfly_custom_get_router_neighbor_list,
 //        .get_router_location            = 
-			dragonfly_custom_get_router_location,
+      dragonfly_custom_get_router_location,
 //        .get_compute_node_location      = 
-			dragonfly_custom_get_compute_node_location,
+      dragonfly_custom_get_compute_node_location,
 //        .get_router_from_compute_node   = 
-			dragonfly_custom_get_router_from_compute_node,
+      dragonfly_custom_get_router_from_compute_node,
 //        .get_router_compute_node_count  = 
-			dragonfly_custom_get_router_compute_node_count,
+      dragonfly_custom_get_router_compute_node_count,
 //        .get_router_compute_node_list   = dragonfly_custom_get_router_compute_node_list,
             dragonfly_custom_get_router_compute_node_list
 };

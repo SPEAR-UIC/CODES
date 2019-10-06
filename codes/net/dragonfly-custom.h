@@ -87,6 +87,11 @@ struct terminal_custom_message
    tw_stime msg_start_time;
    tw_stime saved_busy_time_ross;
    tw_stime saved_fin_chunks_ross;
+
+   //Yao: for counting msg app id
+   int app_id;
+   tw_stime last_received_time;
+   tw_stime last_sent_time;
 };
 
 #ifdef __cplusplus

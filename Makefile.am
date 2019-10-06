@@ -71,6 +71,17 @@ if USE_CONC
 src_libcodes_la_SOURCES += src/workload/methods/codes-conc-online-comm-wrkld.C
 AM_CPPFLAGS += ${CONCEPTUAL_CFLAGS} -DUSE_CONC=1
 LDADD += ${CONCEPTUAL_LIBS}
+src_libcodes_la_SOURCES += src/workload/conceputal-skeleton-apps/alltoallv.c
+src_libcodes_la_SOURCES += src/workload/conceputal-skeleton-apps/bcast.c
+src_libcodes_la_SOURCES += src/workload/conceputal-skeleton-apps/allreduce.c
+src_libcodes_la_SOURCES += src/workload/conceputal-skeleton-apps/cosmo.c
+src_libcodes_la_SOURCES += src/workload/conceputal-skeleton-apps/jacobi2d.C
+src_libcodes_la_SOURCES += src/workload/conceputal-skeleton-apps/jacobi3d.C
+src_libcodes_la_SOURCES += src/workload/conceputal-skeleton-apps/jacobi4d.C
+src_libcodes_la_SOURCES += src/workload/conceputal-skeleton-apps/stencil14pt.C
+src_libcodes_la_SOURCES += src/workload/conceputal-skeleton-apps/pingpong.c
+src_libcodes_la_SOURCES += src/workload/conceputal-skeleton-apps/ring.c
+src_libcodes_la_SOURCES += src/workload/conceputal-skeleton-apps/namdcomm.C
 endif
 endif
 

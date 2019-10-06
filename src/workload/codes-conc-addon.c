@@ -10,6 +10,17 @@
 
 #ifdef USE_CONC
 /* list of available benchmarks begin */
+extern struct codes_conceptual_bench alltoallv_bench;
+extern struct codes_conceptual_bench bcast_bench;
+extern struct codes_conceptual_bench allreduce_bench;
+extern struct codes_conceptual_bench cosmo_bench;
+extern struct codes_conceptual_bench jacobi2d_bench;
+extern struct codes_conceptual_bench jacobi3d_bench;
+extern struct codes_conceptual_bench jacobi4d_bench;
+extern struct codes_conceptual_bench stencil14pt_bench;
+extern struct codes_conceptual_bench pingpong_bench;
+extern struct codes_conceptual_bench ring_bench;
+extern struct codes_conceptual_bench namdcomm_bench;
 /* list of available benchmarks end */
 #endif
 
@@ -17,6 +28,17 @@ static struct codes_conceptual_bench const * bench_array_default[] =
 {
 #ifdef USE_CONC
     /* default benchmarks begin */
+    &alltoallv_bench,
+    &bcast_bench,
+    &allreduce_bench,
+    &cosmo_bench,
+    &jacobi2d_bench,
+    &jacobi3d_bench,
+    &jacobi4d_bench,
+    &stencil14pt_bench,
+    &pingpong_bench,
+    &ring_bench,
+    &namdcomm_bench,
     /* default benchmarks end */
 #endif
     NULL

@@ -68,7 +68,7 @@ static int parse_line(
         buf[pos]='\0';
     }
 
-    int list_cap = 8;
+    int list_cap = 20;
     int *lst = malloc(list_cap * sizeof(*lst));
     assert(lst);
     int rank;
@@ -114,7 +114,7 @@ static int jobmap_list_configure(void const * params, void ** ctx)
 
     // job storage
     lst->num_jobs = 0;
-    int job_cap = 8;
+    int job_cap = 20;
     lst->rank_counts = calloc(job_cap, sizeof(*lst->rank_counts));
     assert(lst->rank_counts);
     lst->global_ids = calloc(job_cap, sizeof(*lst->global_ids));
