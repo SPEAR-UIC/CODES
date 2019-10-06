@@ -60,17 +60,17 @@ src_libcodes_la_SOURCES += src/workload/methods/codes-recorder-io-wrkld.c
 endif
 
 if USE_ONLINE
-AM_CPPFLAGS += ${ARGOBOTS_CFLAGS} ${SWM_CFLAGS} -DUSE_ONLINE=1
+AM_CPPFLAGS += ${ARGOBOTS_CFLAGS} -DUSE_ONLINE=1
 LDADD += ${ARGOBOTS_LIBS}
 if USE_SWM
-AM_CPPFLAGS += -DUSE_SWM=1
+AM_CPPFLAGS +=  ${SWM_CFLAGS} -DUSE_SWM=1
 LDADD += ${SWM_LIBS}
 src_libcodes_la_SOURCES += src/workload/methods/codes-online-comm-wrkld.C
 endif
-if USE_CONC
+if USE_COWG
 src_libcodes_la_SOURCES += src/workload/methods/codes-conc-online-comm-wrkld.C
-AM_CPPFLAGS += ${CONCEPTUAL_CFLAGS} ${COWG_CFLAGS} -DUSE_CONC=1
-LDADD += ${CONCEPTUAL_LIBS} ${COWG_LIBS}
+AM_CPPFLAGS += ${COWG_CFLAGS} ${SWM_CFLAGS} -DUSE_COWG=1
+LDADD += ${COWG_LIBS} ${SWM_LIBS}
 endif
 endif
 

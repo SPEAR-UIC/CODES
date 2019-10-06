@@ -145,28 +145,25 @@ else
   AM_CONDITIONAL(USE_SWM, false)
 fi
 
-#check for Conceptual
-AC_ARG_WITH([conceptual],[AS_HELP_STRING([--with-conceptual@<:@=DIR@:>@],
-                        [location of Conceptual installation])])
-if test "x${with_conceptual}" != "x" ; then
-    AC_CHECK_FILES([${with_conceptual}/lib/libncptl.a],
-        AM_CONDITIONAL(USE_CONC, true),
-        AC_MSG_ERROR(Could not find Conceptual libraries libncptl.a))
-    CONCEPTUAL_CFLAGS="-I${with_conceptual}/include"
-    CONCEPTUAL_LIBS="-L${with_conceptual}/lib/ -lncptl"
-    AC_SUBST(CONCEPTUAL_LIBS)
-    AC_SUBST(CONCEPTUAL_CFLAGS)
+#check for COWG 
+AC_ARG_WITH([cowg],[AS_HELP_STRING([--with-cowg@<:@=DIR@:>@],
+                        [location of COWG installation])])
+if test "x${with_cowg}" != "x" ; then
+    AM_CONDITIONAL(USE_COWG, true)
     PKG_CHECK_MODULES_STATIC([COWG], [cowg], [],
                       [AC_MSG_ERROR([Could not find working cowg installation via pkg-config])])
-    PKG_CHECK_VAR([COWG_DATADIR], [cowg], [datadir], [],
+    PKG_CHECK_VAR([COWG_DATADIR], [cowg], [datarootdir], [],
               [AC_MSG_ERROR[Could not find shared directory in COWG]])
-    AC_DEFINE_UNQUOTED([COWG_DATADIR], ["$COWG_DATADIR"], [if using json
+    AC_DEFINE_UNQUOTED([COWG_DATADIR], ["$COWG_DATADIR"], [if using json data files])
+    PKG_CHECK_MODULES_STATIC([SWM], [swm], [],
+                      [AC_MSG_ERROR([Could not find working swm installation via pkg-config])])
+    PKG_CHECK_VAR([SWM_DATAROOTDIR], [swm], [datarootdir], [],
+              [AC_MSG_ERROR[Could not find shared directory in SWM]])
+    AC_DEFINE_UNQUOTED([SWM_DATAROOTDIR], ["$SWM_DATAROOTDIR"], [if using json
                     data files])
-
 else
-  AM_CONDITIONAL(USE_CONC, false)
+    AM_CONDITIONAL(USE_COWG, false)
 fi
-
 
 # check for Recorder
 AM_CONDITIONAL(USE_RECORDER, true)
