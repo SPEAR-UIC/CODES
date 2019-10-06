@@ -62,6 +62,7 @@ struct shared_context {
     char workload_name[MAX_NAME_LENGTH_WKLD];
     void * swm_obj;
     void * conc_params;
+    bool isconc;
     ABT_thread      producer;
     std::deque<struct codes_workload_op*> fifo;
 };
@@ -76,7 +77,6 @@ typedef struct rank_mpi_compare {
     int app_id;
     int rank;
 } rank_mpi_compare;
-
 
 
 /* Conceptual online workload implementations */
@@ -423,21 +423,14 @@ void COWG_MPI_Irecv(void *buf,
     num_irecvs++;    
 }
 
-void COWG_MPI_Waitall(int count, 
-            MPI_Request array_of_requests[], 
-            MPI_Status array_of_statuses[])
+void COWG_MPI_Wait(MPI_Request *request,
+        MPI_Status *status)
 {
-    num_waitalls++;
     /* Add an event in the shared queue and then yield */
     struct codes_workload_op wrkld_per_rank;
 
-    wrkld_per_rank.op_type = CODES_WK_WAITALL;
-    /* TODO: Check how to convert cycle count into delay? */
-    wrkld_per_rank.u.waits.count = count;
-    wrkld_per_rank.u.waits.req_ids = (unsigned int*)calloc(count, sizeof(int));    
-
-    for(int i = 0; i < count; i++)
-        wrkld_per_rank.u.waits.req_ids[i] = array_of_requests[i];
+    wrkld_per_rank.op_type = CODES_WK_WAIT;
+    wrkld_per_rank.u.wait.req_id = *(MPI_Request *)request;   
 
     /* Retreive the shared context state */
     ABT_thread prod;
@@ -449,9 +442,22 @@ void COWG_MPI_Waitall(int count,
     struct shared_context * sctx = static_cast<shared_context*>(arg);
     sctx->fifo.push_back(&wrkld_per_rank);
     if(DBG_COMM){
-        printf("WAITALL src %d: count %d\n",sctx->my_rank, count);    
+        printf("WAIT src %d\n",sctx->my_rank);    
     }
-    ABT_thread_yield_to(global_prod_thread);   
+    ABT_thread_yield_to(global_prod_thread);       
+}
+
+void COWG_MPI_Waitall(int count, 
+            MPI_Request array_of_requests[], 
+            MPI_Status array_of_statuses[])
+{
+    num_waitalls++;
+    for(int i = 0; i < count; i++)
+        COWG_MPI_Wait(&array_of_requests[i], MPI_STATUS_IGNORE);
+
+    if(DBG_COMM){
+        printf("WAITALL count %d\n", count);    
+    }  
 }
 
 void COWG_MPI_Reduce(const void *sendbuf, 
@@ -614,35 +620,177 @@ void COWG_MPI_Allreduce(const void *sendbuf,
     if(disps) free(disps);    
 }
 
+
+void bcast_binomial(void *buffer,
+              int rank,
+              int count,
+              MPI_Datatype datatype,
+              int root,
+              MPI_Comm comm)
+{
+  int comm_size, src, dst, relative_rank, mask;
+  MPI_Status status;
+  COWG_MPI_Comm_size(comm, &comm_size);
+
+  relative_rank = (rank >= root) ? rank - root : rank - root + comm_size;
+
+  mask = 0x1;
+  while(mask < comm_size)
+  {
+    if(relative_rank & mask)
+    {
+      src = rank - mask;
+      if(src < 0) src += comm_size;
+      COWG_MPI_Recv(buffer,count,datatype,src,-1005,comm, &status);
+      break;
+    }
+    mask <<= 1;
+  }
+
+  mask >>=1;
+  while(mask > 0)
+  {
+    if(relative_rank + mask < comm_size)
+    {
+      dst = rank + mask;
+      if(dst >= comm_size) dst -= comm_size;
+      COWG_MPI_Send(buffer,count,datatype,dst,-1005,comm);
+    }
+    mask >>= 1;
+  }
+}
+
+void bcast_scatter_doubling_allgather(void *buffer,
+              int rank,
+              int count,
+              MPI_Datatype datatype,
+              int root,
+              MPI_Comm comm)
+{
+  int comm_size, dst, relative_rank, mask, scatter_size, curr_size, recvcount, recv_size = 0;
+  MPI_Status status;
+  int j, k, i, tmp_mask;
+  int type_size, nbytes = 0;
+  int relative_dst, dst_tree_root, my_tree_root, send_offset, recv_offset;
+
+  MPI_Type_size(datatype, &type_size);
+  COWG_MPI_Comm_size(comm, &comm_size);
+
+  relative_rank = (rank >= root) ? rank - root : rank - root + comm_size;
+  
+  if(comm_size == 1) return;
+
+  nbytes = type_size * count;
+  if(nbytes == 0) return;
+
+  scatter_size = (nbytes + comm_size - 1)/comm_size; /* ceiling division */
+  curr_size = MIN(scatter_size, (nbytes - (relative_rank * scatter_size)));
+
+  if (curr_size < 0) curr_size = 0;
+
+  mask = 0x1;
+  i = 0;
+
+  while(mask < comm_size) {
+    relative_dst = relative_rank ^ mask;
+    dst = (relative_dst + root) % comm_size;
+
+    dst_tree_root = relative_dst >> i;
+    dst_tree_root <<= i;
+
+    my_tree_root = relative_rank >> i;
+    my_tree_root <<= i;
+  
+    send_offset = my_tree_root * scatter_size;
+    recv_offset = dst_tree_root * scatter_size;
+
+    if(relative_dst < comm_size)
+    {
+      recvcount = (nbytes-recv_offset < 0 ? 0 : nbytes-recv_offset);
+      COWG_MPI_Sendrecv(buffer,curr_size,MPI_BYTE,dst,-1005,buffer,recvcount,MPI_BYTE,dst,-1005,comm,&status);
+      curr_size += recv_size;
+    }
+
+    mask <<= 1;
+    i++;
+  }
+}
+
+void bcast_scatter_ring_allgather(void *buffer,
+              int rank,
+              int count,
+              MPI_Datatype datatype,
+              int root,
+              MPI_Comm comm)
+{
+  int comm_size, scatter_size, j, i, nbytes, type_size;
+  int left, right, jnext, curr_size = 0;
+  int recvd_size;
+  MPI_Status status;
+
+  MPI_Type_size(datatype, &type_size);
+  COWG_MPI_Comm_size(comm, &comm_size);
+
+  if(comm_size == 1) return;
+
+  nbytes = type_size * count;
+  if (nbytes == 0) return;
+
+  scatter_size = (nbytes + comm_size - 1)/comm_size; /* ceiling division */
+
+  curr_size = MIN(scatter_size,  nbytes - ((rank - root + comm_size) % comm_size) * scatter_size);
+  if(curr_size < 0) curr_size = 0;
+
+  left  = (comm_size + rank - 1) % comm_size;
+  right = (rank + 1) % comm_size;
+  j = rank;
+  jnext = left;
+
+  for (i=1; i<comm_size; i++)
+  {
+    int left_count, right_count, left_disp, right_disp, rel_j, rel_jnext;
+    rel_j     = (j     - root + comm_size) % comm_size;
+    rel_jnext = (jnext - root + comm_size) % comm_size;
+    left_count = MIN(scatter_size, (nbytes - rel_jnext * scatter_size));
+    if(left_count < 0) left_count = 0;
+    left_disp = rel_jnext * scatter_size;
+    right_count = MIN(scatter_size, (nbytes - rel_j * scatter_size));
+    if(right_count < 0) right_count = 0;
+    right_disp = rel_j * scatter_size;
+
+    COWG_MPI_Sendrecv(buffer,right_count,MPI_BYTE,right,-1005,buffer,left_count,MPI_BYTE,left,-1005,comm,&status);  
+    curr_size += recvd_size;
+    j = jnext;
+    jnext = (comm_size + jnext - 1) % comm_size;
+  }
+}
+
+
 void COWG_MPI_Bcast(void *buffer, 
             int count, 
             MPI_Datatype datatype, 
             int root, 
             MPI_Comm comm)
 {
-    //todo
-}
+    int type_size, comm_size, rank;
+    MPI_Type_size(datatype, &type_size);
+    COWG_MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    COWG_MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
+    int nbytes = count * type_size;
 
-void COWG_MPI_Alltoall(const void *sendbuf, 
-            int sendcount, 
-            MPI_Datatype sendtype, 
-            void *recvbuf,
-            int recvcount, 
-            MPI_Datatype recvtype, 
-            MPI_Comm comm)
-{
-    int *sendcounts, *sdispls, *recvcounts, *rdispls;
-    int i, comm_size;
-
-    COWG_MPI_Comm_size(comm, &comm_size);
- 
-    for (i=0; i<comm_size; i++) {
-        sendcounts[i] = sendcount;
-        recvcounts[i] = recvcount;
-        rdispls[i] = i * recvcount;
-        sdispls[i] = i * sendcount;
+    if((nbytes < 12288) || (comm_size < 8)) {
+    //use binomial algorithm
+    bcast_binomial(buffer,rank,count,datatype,root,comm);
+    } else if((nbytes < 524288) && !(comm_size & (comm_size - 1))) {
+    //use scatter followed by recursive doubling allgather
+    bcast_scatter_doubling_allgather(buffer,rank,count,datatype,root,comm);
+    } else {
+    //use scatter followed by ring allgather
+    bcast_scatter_ring_allgather(buffer,rank,count,datatype,root,comm);
     }
-    COWG_MPI_Alltoallv(sendbuf, sendcounts, sdispls, sendtype, recvbuf, recvcounts, rdispls, recvtype, comm);
+    if(DBG_COMM){
+        printf("BCAST src %d\n", root);    
+    }  
 }
 
 void COWG_MPI_Alltoallv(const void *sendbuf, 
@@ -693,9 +841,42 @@ void COWG_MPI_Alltoallv(const void *sendbuf,
                 req_cnt++;
             }
         }
-        COWG_MPI_Waitall(req_cnt, reqarray, starray);
+        // COWG_MPI_Waitall(req_cnt, reqarray, starray);
+        COWG_MPI_Barrier(comm);
     } 
 }
+
+void COWG_MPI_Alltoall(const void *sendbuf, 
+            int sendcount, 
+            MPI_Datatype sendtype, 
+            void *recvbuf,
+            int recvcount, 
+            MPI_Datatype recvtype, 
+            MPI_Comm comm)
+{
+    int *sendcounts, *sdispls, *recvcounts, *rdispls;
+    int i, comm_size;
+    COWG_MPI_Comm_size(comm, &comm_size);
+
+    sendcounts = (int *)malloc( comm_size * sizeof(int) );
+    recvcounts = (int *)malloc( comm_size * sizeof(int) );
+    rdispls = (int *)malloc( comm_size * sizeof(int) );
+    sdispls = (int *)malloc( comm_size * sizeof(int) );
+ 
+    for (i=0; i<comm_size; i++) {
+        sendcounts[i] = sendcount;
+        recvcounts[i] = recvcount;
+        rdispls[i] = i * recvcount;
+        sdispls[i] = i * sendcount;
+    }
+    COWG_MPI_Alltoallv(sendbuf, sendcounts, sdispls, sendtype, recvbuf, recvcounts, rdispls, recvtype, comm);
+   
+    free( sdispls );
+    free( rdispls );
+    free( recvcounts );
+    free( sendcounts );
+}
+
 
 
 //#ifdef USE_SWM
@@ -754,6 +935,12 @@ void SWM_Send(SWM_PEER peer,
     struct shared_context * sctx = static_cast<shared_context*>(arg);
     wrkld_per_rank.u.send.source_rank = sctx->my_rank;
     sctx->fifo.push_back(&wrkld_per_rank);
+
+    if(DBG_COMM){
+        printf("SEND src %d dst %d: %lld bytes\n", sctx->my_rank, peer,
+                wrkld_per_rank.u.send.num_bytes);
+    // printf("Rank %d yield to CODES thread: %p\n", sctx->my_rank, global_prod_thread);
+    }
 
     ABT_thread_yield_to(global_prod_thread);
     num_sends++;
@@ -879,6 +1066,11 @@ void SWM_Isend(SWM_PEER peer,
     wrkld_per_rank.u.send.req_id = *handle;
     sctx->wait_id++;
 
+    if(DBG_COMM){
+        printf("ISEND src %d dst %d: %lld bytes\n", sctx->my_rank, peer,
+                wrkld_per_rank.u.send.num_bytes);
+    }
+
     ABT_thread_yield_to(global_prod_thread);
     num_isends++;
 }
@@ -909,6 +1101,11 @@ void SWM_Recv(SWM_PEER peer,
     wrkld_per_rank.u.recv.dest_rank = sctx->my_rank;
     sctx->fifo.push_back(&wrkld_per_rank);
 
+    if(DBG_COMM){
+        printf("RECV src %d dst %d: %lld bytes\n", peer, sctx->my_rank, 
+                wrkld_per_rank.u.recv.num_bytes);    
+    }
+
     ABT_thread_yield_to(global_prod_thread);
     num_recvs++;
 }
@@ -928,10 +1125,6 @@ void SWM_Irecv(SWM_PEER peer,
     wrkld_per_rank.u.recv.source_rank = peer;
     wrkld_per_rank.u.recv.num_bytes = 0;
 
-#ifdef DBG_COMM
-//    printf("\n irecv op tag: %d source: %d ", tag, peer);
-#endif
-
     /* Retreive the shared context state */
     ABT_thread prod;
     void * arg;
@@ -942,10 +1135,16 @@ void SWM_Irecv(SWM_PEER peer,
     struct shared_context * sctx = static_cast<shared_context*>(arg);
     wrkld_per_rank.u.recv.dest_rank = sctx->my_rank;
     sctx->fifo.push_back(&wrkld_per_rank);
+
     
     *handle = sctx->wait_id;
     wrkld_per_rank.u.recv.req_id = *handle;
     sctx->wait_id++;
+
+    if(DBG_COMM){
+        printf("IRECV src %d dst %d: %lld bytes\n", peer, sctx->my_rank, 
+                wrkld_per_rank.u.recv.num_bytes);    
+    }
 
     ABT_thread_yield_to(global_prod_thread);
     num_irecvs++;
@@ -968,7 +1167,7 @@ void SWM_Compute(long cycle_count)
     wrkld_per_rank.u.delay.nsecs = delay_in_ns;
     wrkld_per_rank.u.delay.seconds = delay_in_seconds;
 #ifdef DBG_COMM
-    printf("\n compute op delay: %f ", delay_in_ns);
+    printf("\n Compute op delay: %f ", delay_in_ns);
 #endif
     /* Retreive the shared context state */
     ABT_thread prod;
@@ -1007,6 +1206,10 @@ void SWM_Wait(uint32_t req_id)
     struct shared_context * sctx = static_cast<shared_context*>(arg);
     sctx->fifo.push_back(&wrkld_per_rank);
 
+    if(DBG_COMM){
+        printf("WAIT src %d\n",sctx->my_rank);    
+    }
+
     ABT_thread_yield_to(global_prod_thread);
 }
 
@@ -1037,6 +1240,10 @@ void SWM_Waitall(int len, uint32_t * req_ids)
     assert(err == ABT_SUCCESS);
     struct shared_context * sctx = static_cast<shared_context*>(arg);
     sctx->fifo.push_back(&wrkld_per_rank);
+
+    if(DBG_COMM){
+        printf("WAITALL src %d: count %d\n",sctx->my_rank, len);    
+    }
 
     ABT_thread_yield_to(global_prod_thread);
 }
@@ -1072,20 +1279,6 @@ void SWM_Sendrecv(
     recv_op.u.recv.source_rank = recvpeer;
     recv_op.u.recv.num_bytes = 0;
 
-#ifdef DBG_COMM
-/*    if(sendtag != 1235 && sendtag != 1234) 
-    {
-        auto it = send_count.find(sendbytes);
-        if(it == send_count.end())
-        {
-            send_count.insert(std::make_pair(sendbytes, 1));
-        }
-        else
-        {
-            it->second = it->second + 1;
-        }
-    }*/
-#endif
     /* Retreive the shared context state */
     ABT_thread prod;
     void * arg;
@@ -1098,6 +1291,11 @@ void SWM_Sendrecv(
     send_op.u.send.source_rank = sctx->my_rank;
     sctx->fifo.push_back(&send_op);
     sctx->fifo.push_back(&recv_op);
+
+    if(DBG_COMM){
+        printf("SENDRECV ssrc %d sdst %d: %d bytes; rsrc %d rdst %d: %lld bytes\n", sctx->my_rank, sendpeer,
+                sendbytes, recvpeer, sctx->my_rank, recv_op.u.recv.num_bytes);
+    }
 
     ABT_thread_yield_to(global_prod_thread);
     num_sendrecv++;
@@ -1351,29 +1549,28 @@ void SWM_Finalize()
     struct shared_context * sctx = static_cast<shared_context*>(arg);
     sctx->fifo.push_back(&wrkld_per_rank);
 
-#ifdef DBG_COMM 
-/*    auto it = allreduce_count.begin();
-    for(; it != allreduce_count.end(); it++)
-    {
-        cout << "\n Allreduce " << it->first << " " << it->second;
+    if(DBG_COMM){
+        /*    
+        auto it = allreduce_count.begin();
+        for(; it != allreduce_count.end(); it++)
+        {
+            cout << "\n Allreduce " << it->first << " " << it->second;
+        }
+        
+        it = send_count.begin();
+        for(; it != send_count.end(); it++)
+        {
+            cout << "\n Send " << it->first << " " << it->second;
+        }
+        
+        it = isend_count.begin();
+        for(; it != isend_count.end(); it++)
+        {
+            cout << "\n isend " << it->first << " " << it->second;
+        }*/
+        printf("\n finalize workload for rank %d ", sctx->my_rank);
+        //printf("\n finalize workload for rank %d num_sends %ld num_recvs %ld num_isends %ld num_irecvs %ld num_allreduce %ld num_barrier %ld num_waitalls %ld", sctx->my_rank, num_sends, num_recvs, num_isends, num_irecvs, num_allreduce, num_barriers, num_waitalls);
     }
-    
-    it = send_count.begin();
-    for(; it != send_count.end(); it++)
-    {
-        cout << "\n Send " << it->first << " " << it->second;
-    }
-    
-    it = isend_count.begin();
-    for(; it != isend_count.end(); it++)
-    {
-        cout << "\n isend " << it->first << " " << it->second;
-    }*/
-#endif
-//#ifdef DBG_COMM
-//    printf("\n finalize workload for rank %d ", sctx->my_rank);
-//    printf("\n finalize workload for rank %d num_sends %d num_recvs %d num_isends %d num_irecvs %d num_allreduce %d num_barrier %d num_waitalls %d", sctx->my_rank, num_sends, num_recvs, num_isends, num_irecvs, num_allreduce, num_barriers, num_waitalls);
-//#endif
     ABT_thread_yield_to(global_prod_thread);
 }
 
@@ -1457,6 +1654,7 @@ static int comm_online_workload_load(const char * params, int app_id, int rank)
     string swm_path, conc_path;
     bool isconc=0;
 
+    // printf("workload name: %s\n", o_params->workload_name);
     swm_path.append(SWM_DATAROOTDIR);
     if(strcmp(o_params->workload_name, "lammps") == 0)
     {
@@ -1511,6 +1709,7 @@ static int comm_online_workload_load(const char * params, int app_id, int rank)
                 i += 1;           
             }
             my_ctx->sctx.conc_params = (void*) tmp_params;
+            my_ctx->sctx.isconc = 1;
         }
         catch(std::exception & e)
         {
@@ -1530,6 +1729,7 @@ static int comm_online_workload_load(const char * params, int app_id, int rank)
             printf("%s \n", e.what());
             return -1;
         }
+        my_ctx->sctx.isconc = 0;
         if(strcmp(o_params->workload_name, "lammps") == 0)
         {
             LAMMPS_SWM * lammps_swm = new LAMMPS_SWM(root, generic_ptrs);
@@ -1620,6 +1820,7 @@ static int comm_online_workload_get_rank_cnt(const char *params, int app_id)
 
 static int comm_online_workload_finalize(const char* params, int app_id, int rank)
 {
+    // printf("Rank %d: Finalize workload for app %d\n", rank, app_id);
     rank_mpi_context * temp_data;
     struct qhash_head * hash_link = NULL;
     rank_mpi_compare cmp;
@@ -1639,7 +1840,10 @@ static int comm_online_workload_finalize(const char* params, int app_id, int ran
     // printf("thread terminate rc=%d\n", rc);
     rc = ABT_thread_free(&(temp_data->sctx.producer));
     // printf("thread free rc=%d\n", rc);
-    free(temp_data->sctx.conc_params);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+    if (temp_data->sctx.isconc){
+        // printf("free conceptual params\n");
+        free(temp_data->sctx.conc_params);   
+    }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
     return 0;
 }
 extern "C" {

@@ -3160,7 +3160,7 @@ dragonfly_dally_terminal_final( terminal_state * s,
     written = 0;
     if(s->terminal_id == 0)
     {
-      written += sprintf(s->output_buf2 + written, "# Format <LP id> <Terminal ID> <Total Data Size> <Avg packet latency> <# Flits/Packets finished> <Busy Time> <Max packet Latency> <Min packet Latency >\n");
+      written += sprintf(s->output_buf2 + written, "# Format <LP id> <Terminal ID> <Avg latency> <Busy time> <Max packet Latency> <Min packet Latency > <# of packets> <Avg Hops>\n");
     }
     written += sprintf(s->output_buf2 + written, "%llu %llu %lf %lf %lf %lf %llu %lf\n", 
             lp->gid, s->terminal_id, s->total_time/s->finished_chunks, 
