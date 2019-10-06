@@ -21,9 +21,9 @@ class Params(object):
 
         self.num_routers_per_group = int((radix + 1)/2) #a = (radix + 1)/2
         self.num_hosts_per_router = int(self.num_routers_per_group // 2)
-        self.num_gc_per_router = int(self.num_routers_per_group // 2)
+        # self.num_gc_per_router = int(self.num_routers_per_group // 2)
+        self.num_gc_per_router = 8
         self.num_gc_per_group = self.num_gc_per_router * self.num_routers_per_group
-
         num_gc_per_group = self.num_gc_per_router * self.num_routers_per_group
         self.num_groups = int((num_gc_per_group / self.num_conn_between_groups)) + 1
         self.total_routers = self.num_routers_per_group * self.num_groups
@@ -117,7 +117,7 @@ def writeIntra(params,fd):
         for di in range(params.num_routers_per_group):
             if si is not di:
                 fd.write(struct.pack("3i",si,di,0)) #we don't care about the 'color', set third int (color) to 0
-                # print("INTRA %d %d"%(si,di))
+                print("INTRA %d %d"%(si,di))
 
                 for gi in range(params.num_groups): #loop over all groups becasue the intra only iterates over a single group
                     src_gid = getRouterGID(si, gi, params.num_routers_per_group)
@@ -145,7 +145,7 @@ def writeInter(params ,fd):
         dest_rtr_gid = getRouterGID(dest_rtr_local_id, dest_gi, params.num_routers_per_group)
 
         fd.write(struct.pack("2i",src_rtr_gid, dest_rtr_gid))
-        # print("INTER %d %d"%(src_rtr_gid, dest_rtr_gid))
+        print("INTER %d %d"%(src_rtr_gid, dest_rtr_gid))
 
         A[src_rtr_gid,dest_rtr_gid] += 1
 
