@@ -38,7 +38,7 @@ extern struct codes_workload_method recorder_io_workload_method;
 #ifdef USE_SWM
 extern struct codes_workload_method swm_online_comm_workload_method;
 #endif
-#ifdef USE_COWG
+#ifdef USE_UNION
 extern struct codes_workload_method conc_online_comm_workload_method;
 #endif
 
@@ -66,7 +66,7 @@ static struct codes_workload_method const * method_array_default[] =
 #ifdef USE_SWM
     &swm_online_comm_workload_method,
 #endif
-#ifdef USE_COWG
+#ifdef USE_UNION
     &conc_online_comm_workload_method,
 #endif
 #ifdef USE_RECORDER

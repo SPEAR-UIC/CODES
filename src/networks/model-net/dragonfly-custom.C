@@ -378,6 +378,8 @@ struct router_state
    char output_buf2[4096];
    char output_buf3[4096];
    char output_buf4[4096];
+   char output_buf5[4096];
+   char output_buf6[4096];
 
    struct dfly_router_sample * rsamples;
    
@@ -387,6 +389,8 @@ struct router_state
    //Xin: msg couters for apps
    int **recv_msg_counters;
    int **send_msg_counters;
+   tw_stime **agg_busy_time;
+   int64_t **agg_link_traffic;
 
    /* following used for ROSS model-level stats collection */
    tw_stime* busy_time_ross_sample;
@@ -1102,11 +1106,17 @@ void router_custom_setup(router_state * r, tw_lp * lp)
     {   
         r->recv_msg_counters = (int **) calloc(p->counting_windows, sizeof(int *));
         r->send_msg_counters = (int **) calloc(p->counting_windows, sizeof(int *));
+        r->agg_link_traffic = (int64_t **) calloc(p->counting_windows, sizeof(int64_t *));
+        r->agg_busy_time = (tw_stime **) malloc (p->counting_windows * sizeof(tw_stime *));
 
         for (int i = 0; i < p->counting_windows; ++i)
         {
             r->recv_msg_counters[i] = (int*) calloc(p->num_apps, sizeof(int));
             r->send_msg_counters[i] = (int*) calloc(p->num_apps, sizeof(int));
+            r->agg_link_traffic[i] = (int64_t*) calloc(p->radix, sizeof(int64_t));
+            r->agg_busy_time[i] = (tw_stime*) malloc(p->radix * sizeof(tw_stime));
+            for(int j = 0; j < p->radix; j++)
+              r->agg_busy_time[i][j] = 0.0;
         }
     }
 
@@ -2436,13 +2446,13 @@ void dragonfly_custom_router_final(router_state * s,
     if(!s->router_id)
     {
         written = sprintf(s->output_buf, "# Format <LP ID> <Group ID> <Router ID> <Busy time per router port(s)>");
-        written += sprintf(s->output_buf + written, "# Router ports in the order: %d green links, %d black links %d global channels \n", 
-                p->num_router_cols * p->num_row_chans, p->num_router_rows * p->num_col_chans, p->num_global_channels);
+        written += sprintf(s->output_buf + written, "# Router ports in the order: %d local channels, %d global channels %d terminal channels \n", 
+                p->num_router_cols * p->num_row_chans, p->num_global_channels, p->num_cn);
     }
     written += sprintf(s->output_buf + written, "\n %llu %d %d", 
             LLU(lp->gid),
             s->router_id / p->num_routers,
-            s->router_id % p->num_routers);
+            s->router_id );
     for(int d = 0; d < p->radix; d++) 
         written += sprintf(s->output_buf + written, " %lf", s->busy_time[d]);
 
@@ -2453,13 +2463,13 @@ void dragonfly_custom_router_final(router_state * s,
     if(!s->router_id)
     {
         written = sprintf(s->output_buf2, "# Format <LP ID> <Group ID> <Router ID> <Link Traffic per router port(s)>");
-        written += sprintf(s->output_buf2 + written, "# Router ports in the order: %d green links, %d black links %d global channels \n", 
-                p->num_router_cols * p->num_row_chans, p->num_router_rows * p->num_col_chans, p->num_global_channels);
+        written += sprintf(s->output_buf2 + written, "# Router ports in the order: %d local channels, %d global channels %d terminal channels \n", 
+                p->num_router_cols * p->num_row_chans, p->num_global_channels, p->num_cn);
     }
     written += sprintf(s->output_buf2 + written, "\n %llu %d %d",
         LLU(lp->gid),
         s->router_id / p->num_routers,
-        s->router_id % p->num_routers);
+        s->router_id );
 
     for(int d = 0; d < p->radix; d++) 
         written += sprintf(s->output_buf2 + written, " %lld", LLD(s->link_traffic[d]));
@@ -2475,7 +2485,7 @@ void dragonfly_custom_router_final(router_state * s,
           lp_io_write(lp->gid, (char*)"dragonfly-router-recv-msgs", written, s->output_buf3);
       }
       for(int i=0; i < p->counting_windows; i++) {
-        written = sprintf(s->output_buf3, "\n %llu %d %d %lf", LLU(lp->gid), s->router_id / p->num_routers, s->router_id % p->num_routers, (p->counting_start+(i+1)*p->counting_interval));
+        written = sprintf(s->output_buf3, "\n %llu %d %d %lf", LLU(lp->gid), s->router_id / p->num_routers, s->router_id, (p->counting_start+(i+1)*p->counting_interval));
         for (int d=0; d < p->num_apps; d++)
           written += sprintf(s->output_buf3 + written, " %d", (s->recv_msg_counters[i][d]));
         lp_io_write(lp->gid, (char*)"dragonfly-router-recv-msgs", written, s->output_buf3);
@@ -2487,11 +2497,36 @@ void dragonfly_custom_router_final(router_state * s,
           lp_io_write(lp->gid, (char*)"dragonfly-router-send-msgs", written, s->output_buf4);
       }
       for(int i=0; i < p->counting_windows; i++) {
-          written = sprintf(s->output_buf4, "\n %llu %d %d %lf", LLU(lp->gid), s->router_id / p->num_routers, s->router_id % p->num_routers, (p->counting_start+(i+1)*p->counting_interval));
+          written = sprintf(s->output_buf4, "\n %llu %d %d %lf", LLU(lp->gid), s->router_id / p->num_routers, s->router_id, (p->counting_start+(i+1)*p->counting_interval));
           for (int d=0; d < p->num_apps; d++)
-              written += sprintf(s->output_buf4 + written, " %d", (s->recv_msg_counters[i][d]));
+              written += sprintf(s->output_buf4 + written, " %d", (s->send_msg_counters[i][d]));
           lp_io_write(lp->gid, (char*)"dragonfly-router-send-msgs", written, s->output_buf4);
-      }      
+      } 
+
+      // for link traffic
+      if(!s->router_id){
+          written = sprintf(s->output_buf5, "# Format <LP ID> <Group ID> <Router ID> <Window ID> <Link Traffic>\n");
+          lp_io_write(lp->gid, (char*)"dragonfly-router-traffic-sample", written, s->output_buf5);
+      }
+      for(int i=0; i < p->counting_windows; i++) {
+          written = sprintf(s->output_buf5, "\n %llu %d %d %lf", LLU(lp->gid), s->router_id / p->num_routers, s->router_id , (p->counting_start+(i+1)*p->counting_interval));
+          for (int d=0; d < p->radix; d++)
+              written += sprintf(s->output_buf5 + written, " %d", (s->agg_link_traffic[i][d]));
+          lp_io_write(lp->gid, (char*)"dragonfly-router-traffic-sample", written, s->output_buf5);
+      } 
+
+      // for link busy time
+      if(!s->router_id){
+          written = sprintf(s->output_buf6, "# Format <LP ID> <Group ID> <Router ID> <Window ID> <Link Busy Time>\n");
+          lp_io_write(lp->gid, (char*)"dragonfly-router-busytime-sample", written, s->output_buf6);
+      }
+      for(int i=0; i < p->counting_windows; i++) {
+          written = sprintf(s->output_buf6, "\n %llu %d %d %lf", LLU(lp->gid), s->router_id / p->num_routers, s->router_id , (p->counting_start+(i+1)*p->counting_interval));
+          for (int d=0; d < p->radix; d++)
+              written += sprintf(s->output_buf6 + written, " %lf", (s->agg_busy_time[i][d]));
+          lp_io_write(lp->gid, (char*)"dragonfly-router-busytime-sample", written, s->output_buf6);
+      }       
+
     }
 
 }
@@ -3351,24 +3386,32 @@ static void router_packet_send_rc(router_state * s,
         return;  
     }
 
-    //Xin: reverse msg couters 
-    if(s->params->counting_bool>0 && msg->last_sent_time >= s->params->counting_start) {
-        int current_window = (int) ((msg->last_sent_time-s->params->counting_start)/s->params->counting_interval);
-        if(current_window < s->params->counting_windows)
-          s->send_msg_counters[current_window][msg->app_id]--;    
-    }
       
     tw_rand_reverse_unif(lp->rng);
       
     terminal_custom_message_list * cur_entry = (terminal_custom_message_list *)rc_stack_pop(s->st);
     assert(cur_entry);
-    
+   
+    //Xin: reverse msg couters 
+    bool rolback = false;
+    int current_window = -1;
+    if(s->params->counting_bool>0 && msg->last_sent_time >= s->params->counting_start) {
+        current_window = (int) ((msg->last_sent_time-s->params->counting_start)/s->params->counting_interval);
+        if(current_window < s->params->counting_windows) {
+          s->send_msg_counters[current_window][msg->app_id]--;  
+          rolback = true;
+        }
+    } 
+
     if(bf->c11)
     {
         s->link_traffic[output_port] -= cur_entry->msg.packet_size % s->params->chunk_size;
         s->link_traffic_sample[output_port] -= cur_entry->msg.packet_size % s->params->chunk_size; 
         s->ross_rsample.link_traffic_sample[output_port] -= cur_entry->msg.packet_size % s->params->chunk_size; 
         s->link_traffic_ross_sample[output_port] -= cur_entry->msg.packet_size % s->params->chunk_size; 
+        if(rolback && current_window >= 0){
+          s->agg_link_traffic[current_window][output_port] -= cur_entry->msg.packet_size % s->params->chunk_size;
+        }
     }
     if(bf->c12)
     {
@@ -3376,7 +3419,13 @@ static void router_packet_send_rc(router_state * s,
         s->link_traffic_sample[output_port] -= s->params->chunk_size;
         s->ross_rsample.link_traffic_sample[output_port] -= s->params->chunk_size;
         s->link_traffic_ross_sample[output_port] -= s->params->chunk_size;
+        if(rolback && current_window >= 0){
+          s->agg_link_traffic[current_window][output_port] -= s->params->chunk_size;
+        }
     }
+
+
+
     s->next_output_available_time[output_port] = msg->saved_available_time;
 
     prepend_to_terminal_custom_message_list(s->pending_msgs[output_port],
@@ -3425,13 +3474,6 @@ router_packet_send( router_state * s,
     return;
   }
 
-  //Xin: count packets sent & identify their app id 
-  msg->last_sent_time = tw_now(lp);
-  if(s->params->counting_bool>0 && msg->last_sent_time >= s->params->counting_start) {
-      int current_window = (int) ((msg->last_sent_time - s->params->counting_start)/s->params->counting_interval);
-      if(current_window < s->params->counting_windows)
-          s->send_msg_counters[current_window][msg->app_id]++;
-  } 
 
   int to_terminal = 1, global = 0;
   double delay = s->params->cn_delay;
@@ -3497,6 +3539,18 @@ router_packet_send( router_state * s,
   m->intm_lp_id = lp->gid;
   m->magic = router_magic_num;
 
+  //Xin: count packets sent & identify their app id 
+  msg->last_sent_time = tw_now(lp);
+  bool update = false;
+  int current_window = -1;
+  if(s->params->counting_bool>0 && msg->last_sent_time >= s->params->counting_start) {
+      current_window = (int) ((msg->last_sent_time - s->params->counting_start)/s->params->counting_interval);
+      if(current_window < s->params->counting_windows) {
+          s->send_msg_counters[current_window][msg->app_id]++;
+          update = true;
+        }
+  }   
+
   if((cur_entry->msg.packet_size % s->params->chunk_size) && (cur_entry->msg.chunk_id == num_chunks - 1)) {
       bf->c11 = 1;
       s->link_traffic[output_port] +=  (cur_entry->msg.packet_size %
@@ -3507,13 +3561,21 @@ router_packet_send( router_state * s,
                s->params->chunk_size);
       s->link_traffic_ross_sample[output_port] += (cur_entry->msg.packet_size % 
                s->params->chunk_size);
+      if(update && current_window >= 0){
+          s->agg_link_traffic[current_window][output_port] += (cur_entry->msg.packet_size %
+               s->params->chunk_size);
+      }     
   } else {
     bf->c12 = 1;
     s->link_traffic[output_port] += s->params->chunk_size;
     s->link_traffic_sample[output_port] += s->params->chunk_size;
     s->ross_rsample.link_traffic_sample[output_port] += s->params->chunk_size;
     s->link_traffic_ross_sample[output_port] += s->params->chunk_size;
+    if(update && current_window >= 0){
+      s->agg_link_traffic[current_window][output_port] += s->params->chunk_size;
+    }
   }
+
 
   if(cur_entry->msg.packet_ID == LLU(TRACK_PKT) && cur_entry->msg.src_terminal_id == T_ID)
       printf("\n Queuing at the router %d ", s->router_id);
@@ -3577,7 +3639,17 @@ static void router_buf_update_rc(router_state * s,
         s->ross_rsample.busy_time[indx] = msg->saved_sample_time;
         s->busy_time_ross_sample[indx] = msg->saved_busy_time_ross;
         s->last_buf_full[indx][output_chan] = msg->saved_busy_time;
+
+        //Xin: reverse agg busytime (not working for cross window reverse)
+        if(s->params->counting_bool>0 && msg->last_bufupdate_time >= s->params->counting_start) {
+            int current_window = (int) ((msg->last_bufupdate_time - s->params->counting_start)/s->params->counting_interval);
+            if(current_window < s->params->counting_windows) {
+              s->agg_busy_time[current_window][indx] = msg->saved_rcv_time;
+            }
+        }
+
       }
+
       if(bf->c1) {
         terminal_custom_message_list* head = return_tail(s->pending_msgs[indx],
             s->pending_msgs_tail[indx], output_chan);
@@ -3610,8 +3682,26 @@ static void router_buf_update(router_state * s, tw_bf * bf, terminal_custom_mess
     s->busy_time_sample[indx] += (tw_now(lp) - s->last_buf_full[indx][output_chan]);
     s->ross_rsample.busy_time[indx] += (tw_now(lp) - s->last_buf_full[indx][output_chan]);
     s->busy_time_ross_sample[indx] += (tw_now(lp) - s->last_buf_full[indx][output_chan]);
+
+    //Xin: agg busy time
+    msg->last_bufupdate_time = tw_now(lp);
+    if(s->params->counting_bool>0 && msg->last_bufupdate_time >= s->params->counting_start) {
+        int current_window = (int) ((msg->last_bufupdate_time - s->params->counting_start)/s->params->counting_interval);
+        if(current_window < s->params->counting_windows) {
+            int full_window = (int) ((s->last_buf_full[indx][output_chan] - s->params->counting_start)/s->params->counting_interval);
+            if(full_window==current_window) {
+                s->agg_busy_time[current_window][indx] += (tw_now(lp) - s->last_buf_full[indx][output_chan]);
+            } else {
+                s->agg_busy_time[current_window][indx] += (tw_now(lp) - (s->params->counting_start+current_window*s->params->counting_interval));
+                s->agg_busy_time[full_window][indx] += ((s->params->counting_start+current_window*s->params->counting_interval) - s->last_buf_full[indx][output_chan]);
+            }
+          }
+    } 
+
     s->last_buf_full[indx][output_chan] = 0.0;
   }
+
+
   if(s->queued_msgs[indx][output_chan] != NULL) {
     bf->c1 = 1;
     terminal_custom_message_list *head = return_head(s->queued_msgs[indx],

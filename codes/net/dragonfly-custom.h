@@ -92,6 +92,8 @@ struct terminal_custom_message
    int app_id;
    tw_stime last_received_time;
    tw_stime last_sent_time;
+   //Xin: for busy time recording
+   tw_stime last_bufupdate_time;
 };
 
 #ifdef __cplusplus

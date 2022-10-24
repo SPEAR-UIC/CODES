@@ -145,16 +145,16 @@ else
   AM_CONDITIONAL(USE_SWM, false)
 fi
 
-#check for COWG 
-AC_ARG_WITH([cowg],[AS_HELP_STRING([--with-cowg@<:@=DIR@:>@],
-                        [location of COWG installation])])
-if test "x${with_cowg}" != "x" ; then
-    AM_CONDITIONAL(USE_COWG, true)
-    PKG_CHECK_MODULES_STATIC([COWG], [cowg], [],
-                      [AC_MSG_ERROR([Could not find working cowg installation via pkg-config])])
-    PKG_CHECK_VAR([COWG_DATADIR], [cowg], [datarootdir], [],
-              [AC_MSG_ERROR[Could not find shared directory in COWG]])
-    AC_DEFINE_UNQUOTED([COWG_DATADIR], ["$COWG_DATADIR"], [if using json data files])
+#check for UNION 
+AC_ARG_WITH([union],[AS_HELP_STRING([--with-union@<:@=DIR@:>@],
+                        [location of Union installation])])
+if test "x${with_union}" != "x" ; then
+    AM_CONDITIONAL(USE_UNION, true)
+    PKG_CHECK_MODULES_STATIC([UNION], [union], [],
+                      [AC_MSG_ERROR([Could not find working Union installation via pkg-config])])
+    PKG_CHECK_VAR([UNION_DATADIR], [union], [datarootdir], [],
+              [AC_MSG_ERROR[Could not find shared directory in UNION]])
+    AC_DEFINE_UNQUOTED([UNION_DATADIR], ["$UNION_DATADIR"], [if using json data files])
     PKG_CHECK_MODULES_STATIC([SWM], [swm], [],
                       [AC_MSG_ERROR([Could not find working swm installation via pkg-config])])
     PKG_CHECK_VAR([SWM_DATAROOTDIR], [swm], [datarootdir], [],
@@ -162,7 +162,7 @@ if test "x${with_cowg}" != "x" ; then
     AC_DEFINE_UNQUOTED([SWM_DATAROOTDIR], ["$SWM_DATAROOTDIR"], [if using json
                     data files])
 else
-    AM_CONDITIONAL(USE_COWG, false)
+    AM_CONDITIONAL(USE_UNION, false)
 fi
 
 # check for Recorder

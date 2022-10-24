@@ -21,7 +21,7 @@
 #include "codes/quickhash.h"
 #include "codes/codes-jobmap.h"
 #include "codes_config.h"
-#include "cowg_util.h"
+#include "union_util.h"
 
 //#ifdef USE_SWM
 #include "lammps.h"
@@ -82,7 +82,7 @@ typedef struct rank_mpi_compare {
 
 
 /* Conceptual online workload implementations */
-void COWG_MPI_Comm_size (MPI_Comm comm, int *size) 
+void UNION_MPI_Comm_size (MPI_Comm comm, int *size) 
 {
     /* Retreive the shared context state */
     ABT_thread prod;
@@ -99,7 +99,7 @@ void COWG_MPI_Comm_size (MPI_Comm comm, int *size)
     // printf("ranks %d\n", sctx->num_ranks);
 }
 
-void COWG_MPI_Comm_rank( MPI_Comm comm, int *rank ) 
+void UNION_MPI_Comm_rank( MPI_Comm comm, int *rank ) 
 {
     /* Retreive the shared context state */
     ABT_thread prod;
@@ -115,7 +115,7 @@ void COWG_MPI_Comm_rank( MPI_Comm comm, int *rank )
     *rank = sctx->my_rank;
 }
 
-void COWG_MPI_Finalize()
+void UNION_MPI_Finalize()
 {
     /* Add an event in the shared queue and then yield */
     struct codes_workload_op wrkld_per_rank;
@@ -142,7 +142,7 @@ void COWG_MPI_Finalize()
     ABT_thread_yield_to(global_prod_thread);
 }
 
-void COWG_Compute(long cycle_count)
+void UNION_Compute(long cycle_count)
 {
     /* Add an event in the shared queue and then yield */
     struct codes_workload_op wrkld_per_rank;
@@ -165,7 +165,7 @@ void COWG_Compute(long cycle_count)
     ABT_thread_yield_to(global_prod_thread);
 }
 
-void COWG_MPI_Send(const void *buf, 
+void UNION_MPI_Send(const void *buf, 
             int count, 
             MPI_Datatype datatype, 
             int dest, 
@@ -205,7 +205,7 @@ void COWG_MPI_Send(const void *buf,
     num_sends++;    
 }
 
-void COWG_MPI_Recv(void *buf, 
+void UNION_MPI_Recv(void *buf, 
             int count, 
             MPI_Datatype datatype, 
             int source, 
@@ -246,7 +246,7 @@ void COWG_MPI_Recv(void *buf,
     num_recvs++;    
 }
 
-void COWG_MPI_Sendrecv(const void *sendbuf, 
+void UNION_MPI_Sendrecv(const void *sendbuf, 
             int sendcount, 
             MPI_Datatype sendtype,
             int dest, 
@@ -305,7 +305,7 @@ void COWG_MPI_Sendrecv(const void *sendbuf,
 }
 
 
-void COWG_MPI_Barrier(MPI_Comm comm)
+void UNION_MPI_Barrier(MPI_Comm comm)
 {
     /* Retreive the shared context state */
     ABT_thread prod;
@@ -327,7 +327,7 @@ void COWG_MPI_Barrier(MPI_Comm comm)
         dest = (rank + mask) % size;
         src = (rank - mask + size) % size;
 
-        COWG_MPI_Sendrecv(NULL, 0, MPI_INT, dest, 1234, NULL, 0, MPI_INT, src, 1234,
+        UNION_MPI_Sendrecv(NULL, 0, MPI_INT, dest, 1234, NULL, 0, MPI_INT, src, 1234,
                 comm, NULL);
 
         mask <<= 1;
@@ -338,7 +338,7 @@ void COWG_MPI_Barrier(MPI_Comm comm)
     }
 }
 
-void COWG_MPI_Isend(const void *buf, 
+void UNION_MPI_Isend(const void *buf, 
             int count, 
             MPI_Datatype datatype, 
             int dest, 
@@ -383,7 +383,7 @@ void COWG_MPI_Isend(const void *buf,
     num_isends++;
 }
 
-void COWG_MPI_Irecv(void *buf, 
+void UNION_MPI_Irecv(void *buf, 
             int count, 
             MPI_Datatype datatype, 
             int source, 
@@ -426,7 +426,7 @@ void COWG_MPI_Irecv(void *buf,
     num_irecvs++;    
 }
 
-void COWG_MPI_Wait(MPI_Request *request,
+void UNION_MPI_Wait(MPI_Request *request,
         MPI_Status *status)
 {
     /* Add an event in the shared queue and then yield */
@@ -450,20 +450,20 @@ void COWG_MPI_Wait(MPI_Request *request,
     ABT_thread_yield_to(global_prod_thread);       
 }
 
-void COWG_MPI_Waitall(int count, 
+void UNION_MPI_Waitall(int count, 
             MPI_Request array_of_requests[], 
             MPI_Status array_of_statuses[])
 {
     num_waitalls++;
     for(int i = 0; i < count; i++)
-        COWG_MPI_Wait(&array_of_requests[i], MPI_STATUS_IGNORE);
+        UNION_MPI_Wait(&array_of_requests[i], MPI_STATUS_IGNORE);
 
     if(DBG_COMM){
         printf("WAITALL count %d\n", count);    
     }  
 }
 
-void COWG_MPI_Reduce(const void *sendbuf, 
+void UNION_MPI_Reduce(const void *sendbuf, 
             void *recvbuf, 
             int count, 
             MPI_Datatype datatype,
@@ -474,7 +474,7 @@ void COWG_MPI_Reduce(const void *sendbuf,
     //todo
 }
 
-void COWG_MPI_Allreduce(const void *sendbuf, 
+void UNION_MPI_Allreduce(const void *sendbuf, 
             void *recvbuf, 
             int count, 
             MPI_Datatype datatype,
@@ -484,8 +484,8 @@ void COWG_MPI_Allreduce(const void *sendbuf,
     int comm_size, rank, type_size, i, send_idx, recv_idx, last_idx, send_cnt, recv_cnt;
     int pof2, mask, rem, newrank, newdst, dst, *cnts, *disps;
 
-    COWG_MPI_Comm_size(comm, &comm_size);
-    COWG_MPI_Comm_rank(comm, &rank);
+    UNION_MPI_Comm_size(comm, &comm_size);
+    UNION_MPI_Comm_rank(comm, &rank);
     MPI_Type_size(datatype, &type_size);
 
     cnts = disps = NULL;
@@ -503,10 +503,10 @@ void COWG_MPI_Allreduce(const void *sendbuf,
        remaining processes form a nice power-of-two. */
     if (rank < 2*rem) {
         if (rank % 2 == 0) { /* even */
-            COWG_MPI_Send(NULL, count, datatype, rank+1, -1002, comm);
+            UNION_MPI_Send(NULL, count, datatype, rank+1, -1002, comm);
             newrank = -1;
         } else { /* odd */
-            COWG_MPI_Recv(NULL, count, datatype, rank-1, -1002, comm, NULL);
+            UNION_MPI_Recv(NULL, count, datatype, rank-1, -1002, comm, NULL);
             newrank = rank / 2;
         }
     } else {
@@ -528,7 +528,7 @@ void COWG_MPI_Allreduce(const void *sendbuf,
                 newdst = newrank ^ mask;
                 dst = (newdst < rem) ? newdst*2 + 1 : newdst + rem;
 
-                COWG_MPI_Sendrecv(NULL, count, datatype, dst, -1002, NULL, count, datatype, dst, -1002, comm, NULL);
+                UNION_MPI_Sendrecv(NULL, count, datatype, dst, -1002, NULL, count, datatype, dst, -1002, comm, NULL);
                 mask <<= 1;
             }
         } else {
@@ -569,7 +569,7 @@ void COWG_MPI_Allreduce(const void *sendbuf,
                         recv_cnt += cnts[i];
                 }
 
-                COWG_MPI_Sendrecv(NULL, send_cnt, datatype, dst, -1002, NULL, recv_cnt, datatype, dst, -1002, comm, NULL);
+                UNION_MPI_Sendrecv(NULL, send_cnt, datatype, dst, -1002, NULL, recv_cnt, datatype, dst, -1002, comm, NULL);
 
                 send_idx = recv_idx;
                 mask <<= 1;
@@ -603,7 +603,7 @@ void COWG_MPI_Allreduce(const void *sendbuf,
                         recv_cnt += cnts[i];
                 }
 
-                COWG_MPI_Sendrecv(NULL, send_cnt, datatype, dst, -1002, NULL, recv_cnt, datatype, dst, -1002, comm, NULL);
+                UNION_MPI_Sendrecv(NULL, send_cnt, datatype, dst, -1002, NULL, recv_cnt, datatype, dst, -1002, comm, NULL);
 
                 if (newrank > newdst) send_idx = recv_idx;
                 mask >>= 1;
@@ -613,9 +613,9 @@ void COWG_MPI_Allreduce(const void *sendbuf,
 
     if(rank < 2*rem) {
         if(rank % 2) {/* odd */
-            COWG_MPI_Send(NULL, count, datatype, rank-1, -1002, comm);
+            UNION_MPI_Send(NULL, count, datatype, rank-1, -1002, comm);
         } else {
-            COWG_MPI_Recv(NULL, count, datatype, rank+1, -1002, comm, NULL);
+            UNION_MPI_Recv(NULL, count, datatype, rank+1, -1002, comm, NULL);
         }
     }
 
@@ -633,7 +633,7 @@ void bcast_binomial(void *buffer,
 {
   int comm_size, src, dst, relative_rank, mask;
   MPI_Status status;
-  COWG_MPI_Comm_size(comm, &comm_size);
+  UNION_MPI_Comm_size(comm, &comm_size);
 
   relative_rank = (rank >= root) ? rank - root : rank - root + comm_size;
 
@@ -644,7 +644,7 @@ void bcast_binomial(void *buffer,
     {
       src = rank - mask;
       if(src < 0) src += comm_size;
-      COWG_MPI_Recv(buffer,count,datatype,src,-1005,comm, &status);
+      UNION_MPI_Recv(buffer,count,datatype,src,-1005,comm, &status);
       break;
     }
     mask <<= 1;
@@ -657,7 +657,7 @@ void bcast_binomial(void *buffer,
     {
       dst = rank + mask;
       if(dst >= comm_size) dst -= comm_size;
-      COWG_MPI_Send(buffer,count,datatype,dst,-1005,comm);
+      UNION_MPI_Send(buffer,count,datatype,dst,-1005,comm);
     }
     mask >>= 1;
   }
@@ -677,7 +677,7 @@ void bcast_scatter_doubling_allgather(void *buffer,
   int relative_dst, dst_tree_root, my_tree_root, send_offset, recv_offset;
 
   MPI_Type_size(datatype, &type_size);
-  COWG_MPI_Comm_size(comm, &comm_size);
+  UNION_MPI_Comm_size(comm, &comm_size);
 
   relative_rank = (rank >= root) ? rank - root : rank - root + comm_size;
   
@@ -710,7 +710,7 @@ void bcast_scatter_doubling_allgather(void *buffer,
     if(relative_dst < comm_size)
     {
       recvcount = (nbytes-recv_offset < 0 ? 0 : nbytes-recv_offset);
-      COWG_MPI_Sendrecv(buffer,curr_size,MPI_BYTE,dst,-1005,buffer,recvcount,MPI_BYTE,dst,-1005,comm,&status);
+      UNION_MPI_Sendrecv(buffer,curr_size,MPI_BYTE,dst,-1005,buffer,recvcount,MPI_BYTE,dst,-1005,comm,&status);
       curr_size += recv_size;
     }
 
@@ -732,7 +732,7 @@ void bcast_scatter_ring_allgather(void *buffer,
   MPI_Status status;
 
   MPI_Type_size(datatype, &type_size);
-  COWG_MPI_Comm_size(comm, &comm_size);
+  UNION_MPI_Comm_size(comm, &comm_size);
 
   if(comm_size == 1) return;
 
@@ -761,7 +761,7 @@ void bcast_scatter_ring_allgather(void *buffer,
     if(right_count < 0) right_count = 0;
     right_disp = rel_j * scatter_size;
 
-    COWG_MPI_Sendrecv(buffer,right_count,MPI_BYTE,right,-1005,buffer,left_count,MPI_BYTE,left,-1005,comm,&status);  
+    UNION_MPI_Sendrecv(buffer,right_count,MPI_BYTE,right,-1005,buffer,left_count,MPI_BYTE,left,-1005,comm,&status);  
     curr_size += recvd_size;
     j = jnext;
     jnext = (comm_size + jnext - 1) % comm_size;
@@ -769,7 +769,7 @@ void bcast_scatter_ring_allgather(void *buffer,
 }
 
 
-void COWG_MPI_Bcast(void *buffer, 
+void UNION_MPI_Bcast(void *buffer, 
             int count, 
             MPI_Datatype datatype, 
             int root, 
@@ -777,8 +777,8 @@ void COWG_MPI_Bcast(void *buffer,
 {
     int type_size, comm_size, rank;
     MPI_Type_size(datatype, &type_size);
-    COWG_MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    COWG_MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
+    UNION_MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    UNION_MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
     int nbytes = count * type_size;
 
     if((nbytes < 12288) || (comm_size < 8)) {
@@ -796,7 +796,7 @@ void COWG_MPI_Bcast(void *buffer,
     }  
 }
 
-void COWG_MPI_Alltoallv(const void *sendbuf, 
+void UNION_MPI_Alltoallv(const void *sendbuf, 
             const int *sendcounts, 
             const int *sdispls,
             MPI_Datatype sendtype, 
@@ -816,8 +816,8 @@ void COWG_MPI_Alltoallv(const void *sendbuf,
     MPI_Status starray[2*bblock];
     MPI_Request reqarray[2*bblock];
 
-    COWG_MPI_Comm_size(comm, &comm_size);
-    COWG_MPI_Comm_rank(comm, &rank);
+    UNION_MPI_Comm_size(comm, &comm_size);
+    UNION_MPI_Comm_rank(comm, &rank);
 
 
     for(ii=0; ii<comm_size; ii+=bblock) {
@@ -830,7 +830,7 @@ void COWG_MPI_Alltoallv(const void *sendbuf,
             if (recvcounts[dst]) {
                 req_num++; // hopefuly the program is not doing other requests at the same time...
                 reqarray[req_cnt] = req_num;
-                COWG_MPI_Irecv(NULL, recvcounts[dst], recvtype, dst, -1003, comm, &req_num);
+                UNION_MPI_Irecv(NULL, recvcounts[dst], recvtype, dst, -1003, comm, &req_num);
                 req_cnt++;
             }
         }
@@ -840,16 +840,16 @@ void COWG_MPI_Alltoallv(const void *sendbuf,
             if (sendcounts[dst]) {
                 req_num++;
                 reqarray[req_cnt] = req_num;
-                COWG_MPI_Isend(NULL, sendcounts[dst], sendtype, dst, -1003, comm, &req_num);
+                UNION_MPI_Isend(NULL, sendcounts[dst], sendtype, dst, -1003, comm, &req_num);
                 req_cnt++;
             }
         }
-        // COWG_MPI_Waitall(req_cnt, reqarray, starray);
-        COWG_MPI_Barrier(comm);
+        // UNION_MPI_Waitall(req_cnt, reqarray, starray);
+        UNION_MPI_Barrier(comm);
     } 
 }
 
-void COWG_MPI_Alltoall(const void *sendbuf, 
+void UNION_MPI_Alltoall(const void *sendbuf, 
             int sendcount, 
             MPI_Datatype sendtype, 
             void *recvbuf,
@@ -859,7 +859,7 @@ void COWG_MPI_Alltoall(const void *sendbuf,
 {
     int *sendcounts, *sdispls, *recvcounts, *rdispls;
     int i, comm_size;
-    COWG_MPI_Comm_size(comm, &comm_size);
+    UNION_MPI_Comm_size(comm, &comm_size);
 
     sendcounts = (int *)malloc( comm_size * sizeof(int) );
     recvcounts = (int *)malloc( comm_size * sizeof(int) );
@@ -872,7 +872,7 @@ void COWG_MPI_Alltoall(const void *sendbuf,
         rdispls[i] = i * recvcount;
         sdispls[i] = i * sendcount;
     }
-    COWG_MPI_Alltoallv(sendbuf, sendcounts, sdispls, sendtype, recvbuf, recvcounts, rdispls, recvtype, comm);
+    UNION_MPI_Alltoallv(sendbuf, sendcounts, sdispls, sendtype, recvbuf, recvcounts, rdispls, recvtype, comm);
    
     free( sdispls );
     free( rdispls );
@@ -1595,10 +1595,10 @@ static void workload_caller(void * arg)
 {
     shared_context* sctx = static_cast<shared_context*>(arg);
 
-    //printf("\n workload name %s ", sctx->workload_name);
+    // printf("\n workload name %s ", sctx->workload_name);
     if(strncmp(sctx->workload_name, "conceptual", 10) == 0)
     {
-        cowg_bench_param * conc_params = static_cast<cowg_bench_param*> (sctx->conc_params);
+        union_bench_param * conc_params = static_cast<union_bench_param*> (sctx->conc_params);
         // printf("program: %s\n",conc_params->conc_program);
         // printf("argc: %d\n",conc_params->conc_argc);
         int i;
@@ -1606,7 +1606,7 @@ static void workload_caller(void * arg)
             conc_params->conc_argv[i] = conc_params->config_in[i];
         }
         // conc_params->argv = &conc_params->conc_argv;
-        cowg_conc_bench_load(conc_params->conc_program, 
+        union_conc_bench_load(conc_params->conc_program, 
                         conc_params->conc_argc, 
                         conc_params->conc_argv);
     } else if(strcmp(sctx->workload_name, "lammps") == 0)
@@ -1685,21 +1685,21 @@ static int comm_online_workload_load(const char * params, int app_id, int rank)
     }    
     else if(strncmp(o_params->workload_name, "conceptual", 10) == 0)
     {
-        conc_path.append(COWG_DATADIR);
+        conc_path.append(UNION_DATADIR);
         conc_path.append("/conceptual.json");
         isconc = 1;
     }
     else
         tw_error(TW_LOC, "\n Undefined workload type %s ", o_params->workload_name);
 
-    // printf("\npath %s\n", conc_path.c_str());
+    // printf("\nUnion jason path %s\n", conc_path.c_str());
     if(isconc){
         try {
             std::ifstream jsonFile(conc_path.c_str());
             boost::property_tree::json_parser::read_json(jsonFile, root);
 
             // printf("workload_name: %s\n", o_params->workload_name);
-            cowg_bench_param *tmp_params = (cowg_bench_param *) calloc(1, sizeof(cowg_bench_param));
+            union_bench_param *tmp_params = (union_bench_param *) calloc(1, sizeof(union_bench_param));
             strcpy(tmp_params->conc_program, &o_params->workload_name[11]);
             child = root.get_child(tmp_params->conc_program);
             tmp_params->conc_argc = child.get<int>("argc");

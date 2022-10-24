@@ -67,10 +67,10 @@ AM_CPPFLAGS +=  ${SWM_CFLAGS} -DUSE_SWM=1
 LDADD += ${SWM_LIBS}
 src_libcodes_la_SOURCES += src/workload/methods/codes-online-comm-wrkld.C
 endif
-if USE_COWG
+if USE_UNION
 src_libcodes_la_SOURCES += src/workload/methods/codes-conc-online-comm-wrkld.C
-AM_CPPFLAGS += ${COWG_CFLAGS} ${SWM_CFLAGS} -DUSE_COWG=1
-LDADD += ${COWG_LIBS} ${SWM_LIBS}
+AM_CPPFLAGS += ${UNION_CFLAGS} ${SWM_CFLAGS} -DUSE_UNION=1
+LDADD += ${UNION_LIBS} ${SWM_LIBS}
 endif
 endif
 
