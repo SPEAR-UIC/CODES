@@ -28,6 +28,7 @@
 #include "nekbone_swm_user_code.h"
 #include "nearest_neighbor_swm_user_code.h"
 #include "all_to_one_swm_user_code.h"
+#include "milc_swm_user_code.h"
 //#endif
 
 #define ALLREDUCE_SHORT_MSG_SIZE 2048
@@ -1170,7 +1171,7 @@ void SWM_Compute(long cycle_count)
     wrkld_per_rank.u.delay.nsecs = delay_in_ns;
     wrkld_per_rank.u.delay.seconds = delay_in_seconds;
 #ifdef DBG_COMM
-    printf("\n Compute op delay: %f ", delay_in_ns);
+    // printf("\n Compute op delay: %f ", delay_in_ns);
 #endif
     /* Retreive the shared context state */
     ABT_thread prod;
@@ -1619,6 +1620,11 @@ static void workload_caller(void * arg)
         NEKBONESWMUserCode * nekbone_swm = static_cast<NEKBONESWMUserCode*>(sctx->swm_obj);
         nekbone_swm->call();
     }
+    else if(strcmp(sctx->workload_name, "milc") == 0)
+    {
+        MilcSWMUserCode * milc_swm = static_cast<MilcSWMUserCode*>(sctx->swm_obj);
+        milc_swm->call();
+    }
     else if(strcmp(sctx->workload_name, "nearest_neighbor") == 0)
     {
        NearestNeighborSWMUserCode * nn_swm = static_cast<NearestNeighborSWMUserCode*>(sctx->swm_obj);
@@ -1666,6 +1672,10 @@ static int comm_online_workload_load(const char * params, int app_id, int rank)
     else if(strcmp(o_params->workload_name, "nekbone") == 0)
     {
         swm_path.append("/workload.json"); 
+    }
+    else if(strcmp(o_params->workload_name, "milc") == 0)
+    {
+        swm_path.append("/milc_skeleton.json");
     }
     else if(strcmp(o_params->workload_name, "nearest_neighbor") == 0)
     {
@@ -1742,6 +1752,11 @@ static int comm_online_workload_load(const char * params, int app_id, int rank)
         {
             NEKBONESWMUserCode * nekbone_swm = new NEKBONESWMUserCode(root, generic_ptrs);
             my_ctx->sctx.swm_obj = (void*)nekbone_swm;
+        }
+        else if(strcmp(o_params->workload_name, "milc") == 0)
+        {   
+            MilcSWMUserCode * milc_swm = new MilcSWMUserCode(root, generic_ptrs);
+            my_ctx->sctx.swm_obj = (void*)milc_swm;
         }
         else if(strcmp(o_params->workload_name, "nearest_neighbor") == 0)
         {

@@ -894,7 +894,7 @@ void arrive_syn_tr(nw_state * s, tw_bf * bf, nw_message * m, tw_lp * lp)
 //    printf("\n Data arrived %d total data %ld ", m->fwd.num_bytes, s->syn_data);
     if(s->local_rank == 0)
      {
-        printf("\n Data arrived %lld rank %llu total data %ld ", m->fwd.num_bytes, s->nw_id, s->syn_data);
+        // printf("\n Data arrived %lld rank %llu total data %ld ", m->fwd.num_bytes, s->nw_id, s->syn_data);
 /*  if(s->syn_data > upper_threshold)
     if(s->local_rank == 0)
      {
@@ -2183,7 +2183,7 @@ void nw_test_init(nw_state* s, tw_lp* lp)
        }
        /*TODO: nprocs is different for dumpi and online workload. for
         * online, it is the number of ranks to be simulated. */
-       // printf("num_traces_of_job %d\n", num_traces_of_job[lid.job]);
+       // printf("conc-online num_traces_of_job %d\n", num_traces_of_job[lid.job]);
        oc_params.nprocs = num_traces_of_job[lid.job]; 
        params = (char*)&oc_params;
        strcpy(type_name, "conc_online_comm_workload");
@@ -2239,6 +2239,7 @@ void nw_test_init(nw_state* s, tw_lp* lp)
         }
         else
         {
+            // printf("\n synthetic pattern: %d ", synthetic_pattern);
             s->synthetic_pattern = synthetic_pattern;
         }
 
@@ -3041,7 +3042,7 @@ int modelnet_mpi_replay(MPI_Comm comm, int* argc, char*** argv )
             }
                 i++;
         }
-        printf("\n num_net_traces %d ", num_net_traces);
+
         fclose(name_file);
         assert(strlen(alloc_file) != 0);
         alloc_spec = 1;
@@ -3064,6 +3065,7 @@ int modelnet_mpi_replay(MPI_Comm comm, int* argc, char*** argv )
             jobmap_ctx = codes_jobmap_configure(CODES_JOBMAP_LIST, &jobmap_p);
         }
     }
+
     MPI_Comm_rank(MPI_COMM_CODES, &rank);
     MPI_Comm_size(MPI_COMM_CODES, &nprocs);
 
